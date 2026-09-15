@@ -1,0 +1,23 @@
+{
+  "name": "zusage",
+  "version": "0.1.0+codex.20260915031318",
+  "description": "Query the current Zentrola user's token usage for the current month and reporting period.",
+  "author": {
+    "name": "Zentrola"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Zentrola Usage",
+    "shortDescription": "View monthly Zentrola usage.",
+    "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for the current client to query the associated user's token usage for the current month and reporting period.",
+    "developerName": "Zentrola",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Use $zusage to query my current-month Zentrola token usage."
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "zentrola-marketplace",
+  "interface": {
+    "displayName": "Zentrola Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "zusage",
+      "source": {
+        "source": "local",
+        "path": "./plugins/zusage"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

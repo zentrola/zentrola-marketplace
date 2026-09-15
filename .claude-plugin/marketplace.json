@@ -1,0 +1,21 @@
+{
+  "name": "zentrola-marketplace",
+  "owner": {
+    "name": "Zentrola"
+  },
+  "metadata": {
+    "description": "Zentrola's internal marketplace for plugins and skills."
+  },
+  "plugins": [
+    {
+      "name": "zusage",
+      "source": "./plugins/zusage",
+      "description": "Query the current Zentrola user's token usage for the current month and reporting period.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Zentrola"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
