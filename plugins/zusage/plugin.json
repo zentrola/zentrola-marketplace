@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "zusage",
+  "version": "0.1.0+codex.20260915073839",
+  "description": "Query the current Zentrola user's token usage for the current month and reporting period.",
+  "author": {
+    "name": "Zentrola"
+  },
+  "license": "Apache-2.0",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Zentrola Usage",
+        "shortDescription": "View monthly Zentrola usage.",
+        "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for Codex to query the associated user's token usage for the current month and reporting period.",
+        "developerName": "Zentrola",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use $zusage to query my current-month Zentrola token usage."
+        ]
+      }
+    }
+  }
+}

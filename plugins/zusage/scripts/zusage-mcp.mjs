@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
@@ -27,26 +30,196 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
 }
 
-function pairFromEnvironment() {
-  const pairs = [
-    {
-      baseURL: process.env.OPENAI_BASE_URL,
-      apiKey: process.env.OPENAI_API_KEY,
-      suffix: '/v1',
-    },
-    {
-      baseURL: process.env.ANTHROPIC_BASE_URL,
-      apiKey: process.env.ANTHROPIC_API_KEY,
-      suffix: '/anthropic',
-    },
-  ]
-  const pair = pairs.find(({ baseURL, apiKey }) => baseURL?.trim() && apiKey?.trim())
-  if (!pair) {
+async function readText(filePath) {
+  try {
+    return await readFile(filePath, 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+async function readJSON(filePath) {
+  const text = await readText(filePath)
+  if (text === undefined) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`Unable to parse client configuration at ${filePath}.`)
+  }
+}
+
+function stripTomlComment(value) {
+  let quote = ''
+  let escaped = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (quote === '"' && character === '\\') {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (character === quote) quote = ''
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === '#') return value.slice(0, index).trim()
+  }
+  return value.trim()
+}
+
+function parseTomlValue(value) {
+  const raw = stripTomlComment(value)
+  if (raw.startsWith('"') && raw.endsWith('"')) {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return undefined
+    }
+  }
+  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1)
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return raw
+}
+
+function parseCodexProvider(config) {
+  let section = ''
+  let activeProvider
+  const providers = new Map()
+  for (const line of config.split(/\r?\n/)) {
+    const sectionMatch = line.match(/^\s*\[\s*model_providers\.(?:"([^"]+)"|'([^']+)'|([\w-]+))\s*\]\s*(?:#.*)?$/)
+    if (sectionMatch) {
+      section = `model_providers.${sectionMatch[1] ?? sectionMatch[2] ?? sectionMatch[3]}`
+      continue
+    }
+    if (/^\s*\[/.test(line)) {
+      section = ''
+      continue
+    }
+    const assignment = line.match(/^\s*([\w-]+)\s*=\s*(.+)$/)
+    if (!assignment) continue
+    const [, key, rawValue] = assignment
+    const value = parseTomlValue(rawValue)
+    if (!section && key === 'model_provider' && typeof value === 'string') {
+      activeProvider = value
+      continue
+    }
+    if (!section.startsWith('model_providers.')) continue
+    const providerName = section.slice('model_providers.'.length)
+    const provider = providers.get(providerName) ?? {}
+    provider[key] = value
+    providers.set(providerName, provider)
+  }
+  return activeProvider ? providers.get(activeProvider) : undefined
+}
+
+function completePair(baseURL, apiKey, suffix, source) {
+  if (typeof baseURL !== 'string' || typeof apiKey !== 'string') return undefined
+  if (!baseURL.trim() || !apiKey.trim()) return undefined
+  return { baseURL: baseURL.trim(), apiKey: apiKey.trim(), suffix, source }
+}
+
+function firstNonBlank(...values) {
+  return values.find((value) => typeof value === 'string' && value.trim())
+}
+
+async function pairFromCodex() {
+  const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')
+  const config = await readText(join(codexHome, 'config.toml'))
+  if (!config) return undefined
+  const provider = parseCodexProvider(config)
+  if (!provider || typeof provider.base_url !== 'string') return undefined
+
+  if (typeof provider.env_key === 'string') {
+    const pair = completePair(
+      provider.base_url,
+      process.env[provider.env_key],
+      '/v1',
+      'Codex provider environment',
+    )
+    if (pair) return pair
+  }
+
+  if (provider.requires_openai_auth === true) {
+    const auth = await readJSON(join(codexHome, 'auth.json'))
+    const pair = completePair(
+      provider.base_url,
+      auth?.OPENAI_API_KEY,
+      '/v1',
+      'Codex config.toml and auth.json',
+    )
+    if (pair) return pair
+  }
+  return undefined
+}
+
+function pairFromOpenAIEnvironment() {
+  return completePair(
+    process.env.OPENAI_BASE_URL,
+    process.env.OPENAI_API_KEY,
+    '/v1',
+    'OpenAI environment',
+  )
+}
+
+async function pairFromClaude() {
+  const environmentPair = completePair(
+    process.env.ANTHROPIC_BASE_URL,
+    firstNonBlank(process.env.ANTHROPIC_AUTH_TOKEN, process.env.ANTHROPIC_API_KEY),
+    '/anthropic',
+    'Claude Code environment',
+  )
+  if (environmentPair) return environmentPair
+
+  const claudeHome = process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude')
+  const settings = await readJSON(join(claudeHome, 'settings.json'))
+  const configuredEnvironment = settings?.env && typeof settings.env === 'object' ? settings.env : {}
+  return completePair(
+    configuredEnvironment.ANTHROPIC_BASE_URL,
+    firstNonBlank(
+      configuredEnvironment.ANTHROPIC_AUTH_TOKEN,
+      configuredEnvironment.ANTHROPIC_API_KEY,
+    ),
+    '/anthropic',
+    'Claude Code settings.json',
+  )
+}
+
+function clientFromArguments() {
+  const clientArguments = process.argv
+    .slice(2)
+    .filter((argument) => argument.startsWith('--client='))
+  if (clientArguments.length !== 1) {
     throw new Error(
-      'No complete Zentrola client environment was detected. Ensure the client process inherits OPENAI_* or ANTHROPIC_* variables that point to Zentrola, then restart the client.',
+      'The MCP launcher must provide exactly one --client=codex or --client=claude argument.',
     )
   }
-  return { ...pair, baseURL: pair.baseURL.trim(), apiKey: pair.apiKey.trim() }
+  const client = clientArguments[0].slice('--client='.length)
+  if (client === 'codex' || client === 'claude') return client
+  throw new Error(
+    'The MCP launcher provided an invalid client. Expected --client=codex or --client=claude.',
+  )
+}
+
+async function pairFromCurrentClient() {
+  // Resolve credentials afresh for every tool call so rotations are picked up without plugin changes.
+  const client = clientFromArguments()
+  const pair =
+    client === 'codex'
+      ? (await pairFromCodex()) ?? pairFromOpenAIEnvironment()
+      : await pairFromClaude()
+  if (pair) return pair
+  throw new Error(
+    `No complete Zentrola ${client === 'codex' ? 'Codex' : 'Claude Code'} configuration was detected. Update the active client gateway credentials, then retry.`,
+  )
 }
 
 function usageEndpoint(baseURL, suffix) {
@@ -70,7 +243,7 @@ function usageEndpoint(baseURL, suffix) {
 }
 
 async function getUsage() {
-  const { baseURL, apiKey, suffix } = pairFromEnvironment()
+  const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
   const endpoint = usageEndpoint(baseURL, suffix)
   let response
   try {

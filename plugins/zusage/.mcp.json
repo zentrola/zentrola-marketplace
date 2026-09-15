@@ -2,13 +2,7 @@
   "mcpServers": {
     "zentrola_usage": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT:-.}/scripts/zusage-mcp.mjs"],
-      "env": {
-        "OPENAI_BASE_URL": "${OPENAI_BASE_URL:-}",
-        "OPENAI_API_KEY": "${OPENAI_API_KEY:-}",
-        "ANTHROPIC_BASE_URL": "${ANTHROPIC_BASE_URL:-}",
-        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY:-}"
-      }
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/zusage-mcp.mjs", "--client=claude"]
     }
   }
 }
