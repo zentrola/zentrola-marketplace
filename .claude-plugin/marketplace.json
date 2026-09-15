@@ -10,7 +10,7 @@
     {
       "name": "zentrola",
       "source": "./plugins/zentrola",
-      "description": "Query the current Zentrola user's token usage for the current month or a requested date range.",
+      "description": "Access Zentrola account information, including token usage and the configured service provider.",
       "version": "0.1.0",
       "author": {
         "name": "Zentrola"

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zentrola Provider"
+  short_description: "Show the current configured Zentrola service provider"
+  default_prompt: "Use $zentrola:provider to show my current Zentrola service provider."
+
+policy:
+  allow_implicit_invocation: true

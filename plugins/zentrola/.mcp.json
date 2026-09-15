@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "zentrola_usage": {
+    "zentrola": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/zusage-mcp.mjs", "--client=claude"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/zentrola-mcp.mjs", "--client=claude"]
     }
   }
 }

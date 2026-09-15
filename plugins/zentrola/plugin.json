@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "zentrola",
-  "version": "0.1.0+codex.20260915105828",
-  "description": "Query the current Zentrola user's token usage for the current month or a requested date range.",
+  "version": "0.1.0+codex.20260915141848",
+  "description": "Access Zentrola account information, including token usage and the configured service provider.",
   "author": {
     "name": "Zentrola"
   },
@@ -10,16 +10,17 @@
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "Zentrola Usage",
-        "shortDescription": "View Zentrola usage by date range.",
-        "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for Codex to query the associated user's token usage for the current month or a requested date range.",
+        "displayName": "Zentrola",
+        "shortDescription": "View Zentrola usage and provider information.",
+        "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for Codex to query token usage and inspect the configured service provider.",
         "developerName": "Zentrola",
         "category": "Productivity",
         "capabilities": [
           "Read"
         ],
         "defaultPrompt": [
-          "Use $zentrola:usage to query my current-month Zentrola token usage."
+          "Use $zentrola:usage to query my current-month Zentrola token usage.",
+          "Use $zentrola:provider to show my current Zentrola service provider."
         ]
       }
     }

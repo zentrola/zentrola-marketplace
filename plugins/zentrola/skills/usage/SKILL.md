@@ -10,7 +10,7 @@ Query the current Zentrola user's actual token usage for the current month or a 
 ## Workflow
 
 1. Determine whether the user requested the default current month or an explicit time range.
-2. Call the `get_usage` tool provided by the Zentrola Usage MCP:
+2. Call the `get_usage` tool provided by the Zentrola MCP:
    - For the default current month, omit both `from` and `to` so the service uses its current UTC-month default.
    - For an explicit range, supply both `from` and `to` as UTC RFC3339 timestamps ending in `Z`. Offset forms such as `+08:00` are not accepted. `from` is inclusive and `to` is exclusive.
 3. Resolve relative or natural-language dates using the user's current timezone and the current date supplied by the runtime. Convert both resulting instants to UTC RFC3339 values ending in `Z` before calling the tool.

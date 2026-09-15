@@ -1,10 +1,10 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
-    "zentrola_usage": {
+    "zentrola": {
       "type": "stdio",
       "command": "node",
-      "args": ["./scripts/zusage-mcp.mjs", "--client=codex"],
+      "args": ["./scripts/zentrola-mcp.mjs", "--client=codex"],
       "cwd": "./"
     }
   }

@@ -2,18 +2,18 @@
 
 [English](./README.md) | 简体中文
 
-Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，其中的 `usage` Skill 用于查询当前 Zentrola 用户本月或指定时间范围的 Token 使用量和统计起止时间。
+Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可查询 Token 使用量并查看当前配置的 Zentrola 服务商。
 
 ## 客户端入口
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
-| Claude Code | `/zusage` |
-| Codex | `$zentrola:usage`，或先通过 `/skills` 选择“Zentrola Usage” |
+| Claude Code | `/zusage` 查询用量；`/zprovider` 查询服务商 |
+| Codex | `$zentrola:usage` 或 `$zentrola:provider` |
 
-Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册真正的 `/zusage`；因此 Codex 使用带插件命名空间的原生 Skill 语法 `$zentrola:usage`。Claude 的 `commands/zusage.md` 保留 `/zusage` 包装层，两端共享同一份 `skills/usage/SKILL.md`。
+Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法 `$zentrola:usage` 和 `$zentrola:provider`。Claude Code 保留 `/zusage` 和 `/zprovider` 包装层，两端使用插件中相同的 Skill。
 
-默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。
+默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。服务商查询直接读取当前客户端配置，不调用后端接口。
 
 ## 目录结构
 
@@ -29,10 +29,15 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册真
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
     ├── commands/zusage.md                # Claude /zusage
-    ├── scripts/zusage-mcp.mjs            # 动态复用客户端网关配置调用 Zentrola
-    └── skills/usage
-        ├── SKILL.md                      # Codex/Claude 共享 Skill
-        └── agents/openai.yaml            # Codex 展示元数据
+    ├── commands/zprovider.md             # Claude /zprovider
+    ├── scripts/zentrola-mcp.mjs          # 统一的 Zentrola MCP server
+    └── skills
+        ├── usage                         # Token 用量查询流程
+        │   ├── SKILL.md
+        │   └── agents/openai.yaml
+        └── provider                      # 服务商查询流程
+            ├── SKILL.md
+            └── agents/openai.yaml
 ```
 
 ## 安装
@@ -53,7 +58,7 @@ codex plugin marketplace add zentrola/zentrola-marketplace
 codex plugin add zentrola@zentrola-marketplace
 ```
 
-也可以在 Plugin 管理界面添加该 GitHub Marketplace 仓库，然后安装“Zentrola Usage”。企业内部分发时，可以由管理员将 Marketplace 配置为组织可用。
+也可以在 Plugin 管理界面添加该 GitHub Marketplace 仓库，然后安装“Zentrola”。企业内部分发时，可以由管理员将 Marketplace 配置为组织可用。
 
 ## 使用条件
 

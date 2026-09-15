@@ -2,18 +2,18 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose `usage` skill queries the current Zentrola user's token usage for the current month or a requested date range.
+The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose skills query token usage and inspect the configured Zentrola service provider.
 
 ## Client entry points
 
 | Client | How to invoke after installation |
 | --- | --- |
-| Claude Code | `/zusage` |
-| Codex | `$zentrola:usage`, or select “Zentrola Usage” from `/skills` |
+| Claude Code | `/zusage` for usage; `/zprovider` for the provider |
+| Codex | `$zentrola:usage` or `$zentrola:provider` |
 
-Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register a real `/zusage` command. Codex therefore uses the namespaced native skill syntax `$zentrola:usage`. For Claude Code, `commands/zusage.md` keeps the `/zusage` wrapper. Both clients share the same `skills/usage/SKILL.md` file.
+Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses the namespaced native skill syntax `$zentrola:usage` and `$zentrola:provider`. Claude Code keeps `/zusage` and `/zprovider` wrappers. Both clients use the same skills packaged by the plugin.
 
-With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin.
+With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin. Provider queries read the current client configuration locally and do not call a backend endpoint.
 
 ## Directory structure
 
@@ -29,10 +29,15 @@ With no parameters, the plugin queries from the start of the current UTC calenda
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
     ├── commands/zusage.md                # Claude /zusage command
-    ├── scripts/zusage-mcp.mjs            # Calls Zentrola using live client gateway configuration
-    └── skills/usage
-        ├── SKILL.md                      # Skill shared by Codex and Claude
-        └── agents/openai.yaml            # Codex display metadata
+    ├── commands/zprovider.md             # Claude /zprovider command
+    ├── scripts/zentrola-mcp.mjs          # Shared Zentrola MCP server
+    └── skills
+        ├── usage                         # Token usage workflow
+        │   ├── SKILL.md
+        │   └── agents/openai.yaml
+        └── provider                      # Provider lookup workflow
+            ├── SKILL.md
+            └── agents/openai.yaml
 ```
 
 ## Installation
@@ -53,7 +58,7 @@ codex plugin marketplace add zentrola/zentrola-marketplace
 codex plugin add zentrola@zentrola-marketplace
 ```
 
-You can also add this GitHub Marketplace repository in the plugin management interface, then install “Zentrola Usage”. For internal enterprise distribution, an administrator can make the Marketplace available to the organization.
+You can also add this GitHub Marketplace repository in the plugin management interface, then install “Zentrola”. For internal enterprise distribution, an administrator can make the Marketplace available to the organization.
 
 ## Requirements
 

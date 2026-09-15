@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola-usage', version: '0.1.0' }
-const tool = {
+const serverInfo = { name: 'zentrola', version: '0.1.0' }
+const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
   description:
@@ -45,6 +45,29 @@ const tool = {
   },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 }
+
+const providerTool = {
+  name: 'get_provider',
+  title: 'Get Zentrola provider',
+  description:
+    'Return the current service provider name from the active client configuration without contacting the Zentrola backend.',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      providerName: { type: 'string' },
+    },
+    required: ['providerName'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+}
+
+const tools = [usageTool, providerTool]
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -138,13 +161,14 @@ function parseCodexProvider(config) {
     provider[key] = value
     providers.set(providerName, provider)
   }
-  return activeProvider ? providers.get(activeProvider) : undefined
+  const provider = activeProvider ? providers.get(activeProvider) : undefined
+  return provider ? { id: activeProvider, config: provider } : undefined
 }
 
-function completePair(baseURL, apiKey, suffix, source) {
+function completePair(baseURL, apiKey, suffix, source, providerName = 'Zentrola') {
   if (typeof baseURL !== 'string' || typeof apiKey !== 'string') return undefined
   if (!baseURL.trim() || !apiKey.trim()) return undefined
-  return { baseURL: baseURL.trim(), apiKey: apiKey.trim(), suffix, source }
+  return { baseURL: baseURL.trim(), apiKey: apiKey.trim(), suffix, source, providerName }
 }
 
 function firstNonBlank(...values) {
@@ -155,8 +179,10 @@ async function pairFromCodex() {
   const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')
   const config = await readText(join(codexHome, 'config.toml'))
   if (!config) return undefined
-  const provider = parseCodexProvider(config)
-  if (!provider || typeof provider.base_url !== 'string') return undefined
+  const resolvedProvider = parseCodexProvider(config)
+  if (!resolvedProvider || typeof resolvedProvider.config.base_url !== 'string') return undefined
+  const { id: providerId, config: provider } = resolvedProvider
+  const providerName = firstNonBlank(provider.name, providerId)
 
   if (typeof provider.env_key === 'string') {
     const pair = completePair(
@@ -164,6 +190,7 @@ async function pairFromCodex() {
       process.env[provider.env_key],
       '/v1',
       'Codex provider environment',
+      providerName,
     )
     if (pair) return pair
   }
@@ -175,6 +202,7 @@ async function pairFromCodex() {
       auth?.OPENAI_API_KEY,
       '/v1',
       'Codex config.toml and auth.json',
+      providerName,
     )
     if (pair) return pair
   }
@@ -425,6 +453,29 @@ async function getUsage(argumentsValue) {
   }
 }
 
+async function getProvider(argumentsValue) {
+  if (
+    argumentsValue === null ||
+    typeof argumentsValue !== 'object' ||
+    Array.isArray(argumentsValue)
+  ) {
+    throw new Error('get_provider arguments must be an object.')
+  }
+  if (Object.keys(argumentsValue).length > 0) {
+    throw new Error('get_provider does not accept arguments.')
+  }
+  const { providerName } = await pairFromCurrentClient()
+  return {
+    content: [{ type: 'text', text: `Current service provider: ${providerName}` }],
+    structuredContent: { providerName },
+  }
+}
+
+const toolHandlers = new Map([
+  [usageTool.name, getUsage],
+  [providerTool.name, getProvider],
+])
+
 async function handle(request) {
   const id = request?.id
   switch (request?.method) {
@@ -436,6 +487,8 @@ async function handle(request) {
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
           serverInfo,
+          instructions:
+            'Use get_usage for token consumption and get_provider for the configured service provider name. Both tools are read-only and reuse the active client configuration.',
         },
       })
       return
@@ -446,10 +499,11 @@ async function handle(request) {
       send({ jsonrpc: '2.0', id, result: {} })
       return
     case 'tools/list':
-      send({ jsonrpc: '2.0', id, result: { tools: [tool] } })
+      send({ jsonrpc: '2.0', id, result: { tools } })
       return
     case 'tools/call':
-      if (request.params?.name !== tool.name) {
+      const toolHandler = toolHandlers.get(request.params?.name)
+      if (!toolHandler) {
         send({
           jsonrpc: '2.0',
           id,
@@ -460,7 +514,7 @@ async function handle(request) {
       try {
         const argumentsValue =
           request.params?.arguments === undefined ? {} : request.params.arguments
-        send({ jsonrpc: '2.0', id, result: await getUsage(argumentsValue) })
+        send({ jsonrpc: '2.0', id, result: await toolHandler(argumentsValue) })
       } catch (error) {
         send({
           jsonrpc: '2.0',

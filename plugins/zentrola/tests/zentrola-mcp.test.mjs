@@ -8,12 +8,12 @@ import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
-const script = fileURLToPath(new URL('../scripts/zusage-mcp.mjs', import.meta.url))
+const script = fileURLToPath(new URL('../scripts/zentrola-mcp.mjs', import.meta.url))
 const pluginRoot = fileURLToPath(new URL('..', import.meta.url))
 const protocolVersion = '2025-06-18'
 const emptyClientEnvironment = {
-  CODEX_HOME: join(tmpdir(), 'zusage-mcp-test-no-codex'),
-  CLAUDE_CONFIG_DIR: join(tmpdir(), 'zusage-mcp-test-no-claude'),
+  CODEX_HOME: join(tmpdir(), 'zentrola-mcp-test-no-codex'),
+  CLAUDE_CONFIG_DIR: join(tmpdir(), 'zentrola-mcp-test-no-claude'),
   OPENAI_BASE_URL: '',
   OPENAI_API_KEY: '',
   ANTHROPIC_BASE_URL: '',
@@ -111,6 +111,10 @@ async function callUsage(rpc, argumentsValue = {}) {
   return rpc(3, 'tools/call', { name: 'get_usage', arguments: argumentsValue })
 }
 
+async function callProvider(rpc, argumentsValue = {}) {
+  return rpc(4, 'tools/call', { name: 'get_provider', arguments: argumentsValue })
+}
+
 async function testEnvironment(t, client, clientEnvironment) {
   let authorization = ''
   const api = await startApi(t, (request, response) => {
@@ -124,10 +128,12 @@ async function testEnvironment(t, client, clientEnvironment) {
 
   const initialized = await initialize(rpc)
   assert.equal(initialized.result.protocolVersion, protocolVersion)
-  assert.equal(initialized.result.serverInfo.name, 'zentrola-usage')
+  assert.equal(initialized.result.serverInfo.name, 'zentrola')
+  assert.match(initialized.result.instructions, /get_usage/)
+  assert.match(initialized.result.instructions, /get_provider/)
 
   const listed = await rpc(2, 'tools/list')
-  assert.deepEqual(listed.result.tools.map(({ name }) => name), ['get_usage'])
+  assert.deepEqual(listed.result.tools.map(({ name }) => name), ['get_usage', 'get_provider'])
   assert.deepEqual(listed.result.tools[0].inputSchema, {
     type: 'object',
     properties: {
@@ -159,6 +165,19 @@ async function testEnvironment(t, client, clientEnvironment) {
     required: ['tokens', 'from', 'to', 'timezone', 'fromLocal', 'toLocal'],
     additionalProperties: false,
   })
+  assert.deepEqual(listed.result.tools[1].inputSchema, {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  })
+  assert.deepEqual(listed.result.tools[1].outputSchema, {
+    type: 'object',
+    properties: {
+      providerName: { type: 'string' },
+    },
+    required: ['providerName'],
+    additionalProperties: false,
+  })
 
   const called = await callUsage(rpc)
   assert.deepEqual(called.result.structuredContent, {
@@ -173,6 +192,10 @@ async function testEnvironment(t, client, clientEnvironment) {
     /Reporting period start: 2026-09-01T08:00:00\+08:00 \(Asia\/Shanghai\)/,
   )
   assert.equal(authorization, 'Bearer vk-test-key')
+
+  const provider = await callProvider(rpc)
+  assert.deepEqual(provider.result.structuredContent, { providerName: 'Zentrola' })
+  assert.match(provider.result.content[0].text, /Current service provider: Zentrola/)
 }
 
 test('get_usage reuses the existing OpenAI-compatible environment', async (t) => {
@@ -296,6 +319,52 @@ test('get_usage dynamically rereads Codex config.toml and auth.json for every ca
     { server: 'first', authorization: 'Bearer vk-first-key' },
     { server: 'second', authorization: 'Bearer vk-second-key' },
   ])
+})
+
+test('get_provider reads the active Codex provider name without contacting the backend', async (t) => {
+  const codexHome = await mkdtemp(join(tmpdir(), 'zentrola-provider-codex-'))
+  t.after(() => rm(codexHome, { recursive: true, force: true }))
+  await writeFile(
+    join(codexHome, 'config.toml'),
+    'model_provider = "zentrola"\n\n[model_providers.zentrola]\nname = "Zentrola China"\nrequires_openai_auth = true\nbase_url = "https://unused.invalid/v1"\n',
+  )
+  await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'vk-test-key' }))
+  const { rpc } = startMcp(t, 'codex', { CODEX_HOME: codexHome })
+  await initialize(rpc)
+
+  const called = await callProvider(rpc)
+
+  assert.deepEqual(called.result.structuredContent, { providerName: 'Zentrola China' })
+  assert.match(called.result.content[0].text, /Current service provider: Zentrola China/)
+})
+
+test('get_provider falls back to the Codex provider identifier when no display name exists', async (t) => {
+  const codexHome = await mkdtemp(join(tmpdir(), 'zentrola-provider-id-codex-'))
+  t.after(() => rm(codexHome, { recursive: true, force: true }))
+  await writeFile(
+    join(codexHome, 'config.toml'),
+    'model_provider = "zentrola"\n\n[model_providers.zentrola]\nrequires_openai_auth = true\nbase_url = "https://unused.invalid/v1"\n',
+  )
+  await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'vk-test-key' }))
+  const { rpc } = startMcp(t, 'codex', { CODEX_HOME: codexHome })
+  await initialize(rpc)
+
+  const called = await callProvider(rpc)
+
+  assert.deepEqual(called.result.structuredContent, { providerName: 'zentrola' })
+})
+
+test('get_provider rejects arguments', async (t) => {
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: 'https://unused.invalid/v1',
+    OPENAI_API_KEY: 'vk-test-key',
+  })
+  await initialize(rpc)
+
+  const called = await callProvider(rpc, { unexpected: true })
+
+  assert.equal(called.result.isError, true)
+  assert.match(called.result.content[0].text, /does not accept arguments/)
 })
 
 test('get_usage reads the existing Claude Code settings.json', async (t) => {
@@ -463,24 +532,24 @@ test('client-specific MCP manifests pass explicit launch arguments', async () =>
   assert.equal(portablePlugin.name, 'zentrola')
   assert.equal(codexCompatibilityPlugin.name, 'zentrola')
   assert.equal(claudePlugin.name, 'zentrola')
-  assert.deepEqual(codexCompatibilityPlugin.mcpServers.zentrola_usage, {
+  assert.deepEqual(codexCompatibilityPlugin.mcpServers.zentrola, {
     type: 'stdio',
     command: 'node',
-    args: ['./scripts/zusage-mcp.mjs', '--client=codex'],
+    args: ['./scripts/zentrola-mcp.mjs', '--client=codex'],
     cwd: './',
   })
   assert.equal(
     portablePlugin.$schema,
     'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
   )
-  assert.deepEqual(codexManifest.mcpServers.zentrola_usage, {
+  assert.deepEqual(codexManifest.mcpServers.zentrola, {
     type: 'stdio',
     command: 'node',
-    args: ['./scripts/zusage-mcp.mjs', '--client=codex'],
+    args: ['./scripts/zentrola-mcp.mjs', '--client=codex'],
     cwd: './',
   })
-  assert.deepEqual(claudeManifest.mcpServers.zentrola_usage.args, [
-    '${CLAUDE_PLUGIN_ROOT}/scripts/zusage-mcp.mjs',
+  assert.deepEqual(claudeManifest.mcpServers.zentrola.args, [
+    '${CLAUDE_PLUGIN_ROOT}/scripts/zentrola-mcp.mjs',
     '--client=claude',
   ])
 })
