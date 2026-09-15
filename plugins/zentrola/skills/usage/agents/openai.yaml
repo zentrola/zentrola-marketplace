@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zentrola Usage"
+  short_description: "View Zentrola token usage for a month or date range"
+  default_prompt: "Use $zentrola:usage to query my current-month Zentrola token usage and reporting period."
+
+policy:
+  allow_implicit_invocation: true

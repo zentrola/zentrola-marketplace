@@ -1,0 +1,8 @@
+{
+  "name": "zentrola",
+  "version": "0.1.0",
+  "description": "Query the current Zentrola user's token usage for the current month or a requested date range.",
+  "author": {
+    "name": "Zentrola"
+  }
+}

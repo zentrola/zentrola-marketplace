@@ -1,7 +1,0 @@
-interface:
-  display_name: "Zentrola Usage"
-  short_description: "View monthly Zentrola token usage and reporting period"
-  default_prompt: "Use $zusage to query my current-month Zentrola token usage and reporting period."
-
-policy:
-  allow_implicit_invocation: true

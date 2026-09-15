@@ -2,16 +2,18 @@
 
 [English](./README.md) | 简体中文
 
-Zentrola Plugin 与 Skill Marketplace。当前包含第一个插件 `zusage`，用于查询当前 Zentrola 用户本月的 Token 使用量和统计起止时间。
+Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，其中的 `usage` Skill 用于查询当前 Zentrola 用户本月或指定时间范围的 Token 使用量和统计起止时间。
 
 ## 客户端入口
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
 | Claude Code | `/zusage` |
-| Codex | `$zusage`，或先通过 `/skills` 选择“Zentrola Usage” |
+| Codex | `$zentrola:usage`，或先通过 `/skills` 选择“Zentrola Usage” |
 
-Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册真正的 `/zusage`；因此 Codex 使用原生 Skill 语法 `$zusage`。Claude 的 `commands/zusage.md` 提供 `/zusage` 包装层，两端共享同一份 `skills/zusage/SKILL.md`。
+Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册真正的 `/zusage`；因此 Codex 使用带插件命名空间的原生 Skill 语法 `$zentrola:usage`。Claude 的 `commands/zusage.md` 保留 `/zusage` 包装层，两端共享同一份 `skills/usage/SKILL.md`。
+
+默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。
 
 ## 目录结构
 
@@ -20,7 +22,7 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册真
 ├── LICENSE.txt                           # Apache License 2.0
 ├── .agents/plugins/marketplace.json     # Codex Marketplace
 ├── .claude-plugin/marketplace.json      # Claude Plugin Marketplace
-└── plugins/zusage
+└── plugins/zentrola
     ├── plugin.json                       # Codex/OpenAI portable Plugin 清单
     ├── mcp.json                          # Codex MCP 启动配置（--client=codex）
     ├── .mcp.json                         # Claude MCP 启动配置（--client=claude）
@@ -28,7 +30,7 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册真
     ├── .claude-plugin/plugin.json
     ├── commands/zusage.md                # Claude /zusage
     ├── scripts/zusage-mcp.mjs            # 动态复用客户端网关配置调用 Zentrola
-    └── skills/zusage
+    └── skills/usage
         ├── SKILL.md                      # Codex/Claude 共享 Skill
         └── agents/openai.yaml            # Codex 展示元数据
 ```
@@ -41,14 +43,14 @@ Claude Code：
 
 ```text
 /plugin marketplace add https://github.com/zentrola/zentrola-marketplace
-/plugin install zusage@zentrola-marketplace
+/plugin install zentrola@zentrola-marketplace
 ```
 
 Codex CLI：
 
 ```text
 codex plugin marketplace add zentrola/zentrola-marketplace
-codex plugin add zusage@zentrola-marketplace
+codex plugin add zentrola@zentrola-marketplace
 ```
 
 也可以在 Plugin 管理界面添加该 GitHub Marketplace 仓库，然后安装“Zentrola Usage”。企业内部分发时，可以由管理员将 Marketplace 配置为组织可用。
@@ -61,7 +63,7 @@ Codex 与 Claude Code 使用各自独立的 MCP 清单，由清单向共享服�
 - Claude Code：读取当前进程环境或 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL`，以及 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`。
 - Codex 环境变量兜底：`OPENAI_BASE_URL` 与 `OPENAI_API_KEY`。
 
-用户只需像平常一样将 Codex 或 Claude Code 配置为使用 Zentrola，不需要为 `zusage` 再配置地址或 Access Key。Codex 调用不会读取 Claude Code 配置，Claude Code 调用也不会读取 Codex 配置。更新文件凭据后，下一次查询会直接使用新值；更新仅存在于进程环境中的变量后，仍需重启对应客户端。
+用户只需像平常一样将 Codex 或 Claude Code 配置为使用 Zentrola，不需要为 `zentrola:usage` 再配置地址或 Access Key。Codex 调用不会读取 Claude Code 配置，Claude Code 调用也不会读取 Codex 配置。更新文件凭据后，下一次查询会直接使用新值；更新仅存在于进程环境中的变量后，仍需重启对应客户端。
 
 本地 MCP 通过系统 `PATH` 中的 `node` 启动，需要 Node.js 18 或更高版本。
 

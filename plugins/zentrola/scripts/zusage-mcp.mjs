@@ -11,16 +11,36 @@ const tool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
   description:
-    "Query the current-month token usage and reporting period for the user associated with the active Zentrola Access Key.",
-  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    'Query token usage for the user associated with the active Zentrola Access Key. Omit both inputs for the current UTC month through now, or provide both UTC RFC3339 timestamps ending in Z for a custom half-open range [from, to).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      from: {
+        type: 'string',
+        format: 'date-time',
+        description:
+          'Inclusive range start as a UTC RFC3339 timestamp ending in Z. Must be provided together with to.',
+      },
+      to: {
+        type: 'string',
+        format: 'date-time',
+        description:
+          'Exclusive range end as a UTC RFC3339 timestamp ending in Z. Must be provided together with from.',
+      },
+    },
+    additionalProperties: false,
+  },
   outputSchema: {
     type: 'object',
     properties: {
       tokens: { type: 'integer', minimum: 0 },
       from: { type: 'string' },
       to: { type: 'string' },
+      timezone: { type: 'string' },
+      fromLocal: { type: 'string' },
+      toLocal: { type: 'string' },
     },
-    required: ['tokens', 'from', 'to'],
+    required: ['tokens', 'from', 'to', 'timezone', 'fromLocal', 'toLocal'],
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -222,7 +242,107 @@ async function pairFromCurrentClient() {
   )
 }
 
-function usageEndpoint(baseURL, suffix) {
+function parseUsageTimestamp(value, field) {
+  if (typeof value !== 'string') {
+    throw new Error(`get_usage ${field} must be an RFC3339 timestamp string.`)
+  }
+  const timestamp = value.trim()
+  const match = timestamp.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/,
+  )
+  if (!match) {
+    throw new Error(`get_usage ${field} must be a UTC RFC3339 timestamp ending in Z.`)
+  }
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (
+    year === 0 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth[month - 1] ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    throw new Error(`get_usage ${field} is not a valid RFC3339 timestamp.`)
+  }
+  const epochMilliseconds = Date.parse(timestamp)
+  if (!Number.isFinite(epochMilliseconds)) {
+    throw new Error(`get_usage ${field} is not a valid RFC3339 timestamp.`)
+  }
+  return { timestamp, epochMilliseconds }
+}
+
+function formatDeviceTimestamp(value, timeZone) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error('Zentrola returned invalid usage data.')
+  }
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+  })
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter(({ type }) => type !== 'literal')
+      .map(({ type, value: partValue }) => [type, partValue]),
+  )
+  const offsetMatch = parts.timeZoneName?.match(/^(?:GMT|UTC)(?:([+-])(\d{1,2})(?::?(\d{2}))?)?$/)
+  if (!offsetMatch) {
+    throw new Error('Unable to format the Zentrola reporting period in the device time zone.')
+  }
+  const offset = offsetMatch[1]
+    ? `${offsetMatch[1]}${offsetMatch[2].padStart(2, '0')}:${offsetMatch[3] ?? '00'}`
+    : 'Z'
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${offset}`
+}
+
+function normalizeUsageRange(argumentsValue) {
+  if (
+    argumentsValue === null ||
+    typeof argumentsValue !== 'object' ||
+    Array.isArray(argumentsValue)
+  ) {
+    throw new Error('get_usage arguments must be an object.')
+  }
+  const unknown = Object.keys(argumentsValue).filter((key) => key !== 'from' && key !== 'to')
+  if (unknown.length > 0) {
+    throw new Error('get_usage accepts only from and to.')
+  }
+  const hasFrom = Object.hasOwn(argumentsValue, 'from')
+  const hasTo = Object.hasOwn(argumentsValue, 'to')
+  if (!hasFrom && !hasTo) return undefined
+  if (!hasFrom || !hasTo) {
+    throw new Error('get_usage from and to must be provided together.')
+  }
+  const from = parseUsageTimestamp(argumentsValue.from, 'from')
+  const to = parseUsageTimestamp(argumentsValue.to, 'to')
+  if (to.epochMilliseconds <= from.epochMilliseconds) {
+    throw new Error('get_usage to must be later than from.')
+  }
+  if (to.epochMilliseconds - from.epochMilliseconds > 366 * 24 * 60 * 60 * 1000) {
+    throw new Error('get_usage range must not exceed 366 days.')
+  }
+  return { from: from.timestamp, to: to.timestamp }
+}
+
+function usageEndpoint(baseURL, suffix, range) {
   let url
   try {
     url = new URL(baseURL)
@@ -239,12 +359,17 @@ function usageEndpoint(baseURL, suffix) {
     path = path.slice(0, -suffix.length)
   }
   url.pathname = `${path}/api/v1/me/usage`.replace(/\/{2,}/g, '/')
+  if (range) {
+    url.searchParams.set('from', range.from)
+    url.searchParams.set('to', range.to)
+  }
   return url
 }
 
-async function getUsage() {
+async function getUsage(argumentsValue) {
+  const range = normalizeUsageRange(argumentsValue)
   const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
-  const endpoint = usageEndpoint(baseURL, suffix)
+  const endpoint = usageEndpoint(baseURL, suffix, range)
   let response
   try {
     response = await fetch(endpoint, {
@@ -278,14 +403,25 @@ async function getUsage() {
     throw new Error('Zentrola returned invalid usage data.')
   }
 
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  const fromLocal = formatDeviceTimestamp(data.from, timezone)
+  const toLocal = formatDeviceTimestamp(data.to, timezone)
+
   const text = [
-    `Current-month token usage: ${data.tokens.toLocaleString('en-US')}`,
-    `Reporting period start: ${data.from}`,
-    `Reporting cutoff: ${data.to}`,
+    `${range ? 'Token usage' : 'Current-month token usage'}: ${data.tokens.toLocaleString('en-US')}`,
+    `Reporting period start: ${fromLocal} (${timezone})`,
+    `Reporting cutoff: ${toLocal} (${timezone})`,
   ].join('\n')
   return {
     content: [{ type: 'text', text }],
-    structuredContent: { tokens: data.tokens, from: data.from, to: data.to },
+    structuredContent: {
+      tokens: data.tokens,
+      from: data.from,
+      to: data.to,
+      timezone,
+      fromLocal,
+      toLocal,
+    },
   }
 }
 
@@ -322,7 +458,9 @@ async function handle(request) {
         return
       }
       try {
-        send({ jsonrpc: '2.0', id, result: await getUsage() })
+        const argumentsValue =
+          request.params?.arguments === undefined ? {} : request.params.arguments
+        send({ jsonrpc: '2.0', id, result: await getUsage(argumentsValue) })
       } catch (error) {
         send({
           jsonrpc: '2.0',

@@ -107,8 +107,8 @@ async function initialize(rpc, requestedVersion = protocolVersion) {
   return rpc(1, 'initialize', { protocolVersion: requestedVersion })
 }
 
-async function callUsage(rpc) {
-  return rpc(3, 'tools/call', { name: 'get_usage', arguments: {} })
+async function callUsage(rpc, argumentsValue = {}) {
+  return rpc(3, 'tools/call', { name: 'get_usage', arguments: argumentsValue })
 }
 
 async function testEnvironment(t, client, clientEnvironment) {
@@ -120,7 +120,7 @@ async function testEnvironment(t, client, clientEnvironment) {
     respondJson(response, successBody())
   })
   const { port } = api.address()
-  const { rpc } = startMcp(t, client, clientEnvironment(port))
+  const { rpc } = startMcp(t, client, { TZ: 'Asia/Shanghai', ...clientEnvironment(port) })
 
   const initialized = await initialize(rpc)
   assert.equal(initialized.result.protocolVersion, protocolVersion)
@@ -128,20 +128,50 @@ async function testEnvironment(t, client, clientEnvironment) {
 
   const listed = await rpc(2, 'tools/list')
   assert.deepEqual(listed.result.tools.map(({ name }) => name), ['get_usage'])
+  assert.deepEqual(listed.result.tools[0].inputSchema, {
+    type: 'object',
+    properties: {
+      from: {
+        type: 'string',
+        format: 'date-time',
+        description:
+          'Inclusive range start as a UTC RFC3339 timestamp ending in Z. Must be provided together with to.',
+      },
+      to: {
+        type: 'string',
+        format: 'date-time',
+        description:
+          'Exclusive range end as a UTC RFC3339 timestamp ending in Z. Must be provided together with from.',
+      },
+    },
+    additionalProperties: false,
+  })
   assert.deepEqual(listed.result.tools[0].outputSchema, {
     type: 'object',
     properties: {
       tokens: { type: 'integer', minimum: 0 },
       from: { type: 'string' },
       to: { type: 'string' },
+      timezone: { type: 'string' },
+      fromLocal: { type: 'string' },
+      toLocal: { type: 'string' },
     },
-    required: ['tokens', 'from', 'to'],
+    required: ['tokens', 'from', 'to', 'timezone', 'fromLocal', 'toLocal'],
     additionalProperties: false,
   })
 
   const called = await callUsage(rpc)
-  assert.deepEqual(called.result.structuredContent, successBody().data)
+  assert.deepEqual(called.result.structuredContent, {
+    ...successBody().data,
+    timezone: 'Asia/Shanghai',
+    fromLocal: '2026-09-01T08:00:00+08:00',
+    toLocal: '2026-09-15T11:20:00+08:00',
+  })
   assert.match(called.result.content[0].text, /Current-month token usage: 156,000/)
+  assert.match(
+    called.result.content[0].text,
+    /Reporting period start: 2026-09-01T08:00:00\+08:00 \(Asia\/Shanghai\)/,
+  )
   assert.equal(authorization, 'Bearer vk-test-key')
 }
 
@@ -157,6 +187,80 @@ test('get_usage reuses the existing Anthropic-compatible environment', async (t)
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/anthropic`,
     ANTHROPIC_API_KEY: 'vk-test-key',
   }))
+})
+
+test('get_usage passes an explicit RFC3339 range to Zentrola', async (t) => {
+  const from = '2026-09-01T00:00:00Z'
+  const to = '2026-09-15T00:00:00Z'
+  let requestedURL
+  const api = await startApi(t, (request, response) => {
+    requestedURL = new URL(request.url, 'http://127.0.0.1')
+    respondJson(response, {
+      code: 'OK',
+      data: { tokens: 42000, from, to },
+    })
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    TZ: 'Asia/Shanghai',
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-test-key',
+  })
+  await initialize(rpc)
+
+  const called = await callUsage(rpc, { from, to })
+
+  assert.equal(requestedURL.pathname, '/api/v1/me/usage')
+  assert.equal(requestedURL.searchParams.get('from'), from)
+  assert.equal(requestedURL.searchParams.get('to'), to)
+  assert.deepEqual(called.result.structuredContent, {
+    tokens: 42000,
+    from,
+    to,
+    timezone: 'Asia/Shanghai',
+    fromLocal: '2026-09-01T08:00:00+08:00',
+    toLocal: '2026-09-15T08:00:00+08:00',
+  })
+  assert.match(called.result.content[0].text, /^Token usage: 42,000/m)
+})
+
+test('get_usage validates custom ranges before contacting Zentrola', async (t) => {
+  let requestCount = 0
+  const api = await startApi(t, (_request, response) => {
+    requestCount += 1
+    respondJson(response, successBody())
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-test-key',
+  })
+  await initialize(rpc)
+
+  const cases = [
+    [{ from: '2026-09-01T00:00:00Z' }, /must be provided together/],
+    [{ from: '2026-09-01', to: '2026-09-02' }, /UTC RFC3339 timestamp ending in Z/],
+    [
+      { from: '2026-09-01T08:00:00+08:00', to: '2026-09-02T08:00:00+08:00' },
+      /UTC RFC3339 timestamp ending in Z/,
+    ],
+    [
+      { from: '2026-09-02T00:00:00Z', to: '2026-09-01T00:00:00Z' },
+      /to must be later than from/,
+    ],
+    [
+      { from: '2025-01-01T00:00:00Z', to: '2026-09-01T00:00:00Z' },
+      /must not exceed 366 days/,
+    ],
+    [
+      { from: '2026-09-01T00:00:00Z', to: '2026-09-02T00:00:00Z', timezone: 'UTC' },
+      /accepts only from and to/,
+    ],
+  ]
+  for (const [argumentsValue, expectedError] of cases) {
+    const called = await callUsage(rpc, argumentsValue)
+    assert.equal(called.result.isError, true)
+    assert.match(called.result.content[0].text, expectedError)
+  }
+  assert.equal(requestCount, 0)
 })
 
 test('get_usage dynamically rereads Codex config.toml and auth.json for every call', async (t) => {
@@ -345,6 +449,9 @@ test('client-specific MCP manifests pass explicit launch arguments', async () =>
   const codexCompatibilityPlugin = JSON.parse(
     await readFile(join(pluginRoot, '.codex-plugin', 'plugin.json'), 'utf8'),
   )
+  const claudePlugin = JSON.parse(
+    await readFile(join(pluginRoot, '.claude-plugin', 'plugin.json'), 'utf8'),
+  )
   const codexManifest = JSON.parse(await readFile(join(pluginRoot, 'mcp.json'), 'utf8'))
   const claudeManifest = JSON.parse(await readFile(join(pluginRoot, '.mcp.json'), 'utf8'))
 
@@ -353,6 +460,15 @@ test('client-specific MCP manifests pass explicit launch arguments', async () =>
     codexCompatibilityPlugin.version,
     'Codex portable and compatibility manifest versions must stay in sync',
   )
+  assert.equal(portablePlugin.name, 'zentrola')
+  assert.equal(codexCompatibilityPlugin.name, 'zentrola')
+  assert.equal(claudePlugin.name, 'zentrola')
+  assert.deepEqual(codexCompatibilityPlugin.mcpServers.zentrola_usage, {
+    type: 'stdio',
+    command: 'node',
+    args: ['./scripts/zusage-mcp.mjs', '--client=codex'],
+    cwd: './',
+  })
   assert.equal(
     portablePlugin.$schema,
     'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',

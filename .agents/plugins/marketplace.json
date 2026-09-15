@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "zusage",
+      "name": "zentrola",
       "source": {
         "source": "local",
-        "path": "./plugins/zusage"
+        "path": "./plugins/zentrola"
       },
       "policy": {
         "installation": "AVAILABLE",

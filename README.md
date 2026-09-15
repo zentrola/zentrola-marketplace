@@ -2,16 +2,18 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-The Zentrola marketplace for plugins and skills. It currently contains its first plugin, `zusage`, which queries the current Zentrola user's token usage for the current month and the corresponding reporting period.
+The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose `usage` skill queries the current Zentrola user's token usage for the current month or a requested date range.
 
 ## Client entry points
 
 | Client | How to invoke after installation |
 | --- | --- |
 | Claude Code | `/zusage` |
-| Codex | `$zusage`, or select “Zentrola Usage” from `/skills` |
+| Codex | `$zentrola:usage`, or select “Zentrola Usage” from `/skills` |
 
-Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register a real `/zusage` command. Codex therefore uses the native skill syntax `$zusage`. For Claude Code, `commands/zusage.md` provides the `/zusage` wrapper. Both clients share the same `skills/zusage/SKILL.md` file.
+Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register a real `/zusage` command. Codex therefore uses the namespaced native skill syntax `$zentrola:usage`. For Claude Code, `commands/zusage.md` keeps the `/zusage` wrapper. Both clients share the same `skills/usage/SKILL.md` file.
+
+With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin.
 
 ## Directory structure
 
@@ -20,7 +22,7 @@ Custom prompt slash commands have been deprecated in Codex, and regular skills c
 ├── LICENSE.txt                           # Apache License 2.0
 ├── .agents/plugins/marketplace.json     # Codex Marketplace
 ├── .claude-plugin/marketplace.json      # Claude Plugin Marketplace
-└── plugins/zusage
+└── plugins/zentrola
     ├── plugin.json                       # Portable Codex/OpenAI plugin manifest
     ├── mcp.json                          # Codex MCP launcher (--client=codex)
     ├── .mcp.json                         # Claude MCP launcher (--client=claude)
@@ -28,7 +30,7 @@ Custom prompt slash commands have been deprecated in Codex, and regular skills c
     ├── .claude-plugin/plugin.json
     ├── commands/zusage.md                # Claude /zusage command
     ├── scripts/zusage-mcp.mjs            # Calls Zentrola using live client gateway configuration
-    └── skills/zusage
+    └── skills/usage
         ├── SKILL.md                      # Skill shared by Codex and Claude
         └── agents/openai.yaml            # Codex display metadata
 ```
@@ -41,14 +43,14 @@ Claude Code:
 
 ```text
 /plugin marketplace add https://github.com/zentrola/zentrola-marketplace
-/plugin install zusage@zentrola-marketplace
+/plugin install zentrola@zentrola-marketplace
 ```
 
 Codex CLI:
 
 ```text
 codex plugin marketplace add zentrola/zentrola-marketplace
-codex plugin add zusage@zentrola-marketplace
+codex plugin add zentrola@zentrola-marketplace
 ```
 
 You can also add this GitHub Marketplace repository in the plugin management interface, then install “Zentrola Usage”. For internal enterprise distribution, an administrator can make the Marketplace available to the organization.
@@ -61,7 +63,7 @@ Codex and Claude Code use separate MCP manifests. Each manifest passes an explic
 - Claude Code: reads `ANTHROPIC_BASE_URL` together with `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` from the current process environment or `~/.claude/settings.json`.
 - Codex environment fallback: `OPENAI_BASE_URL` and `OPENAI_API_KEY`.
 
-Users only configure Codex or Claude Code to use Zentrola as usual; `zusage` needs no separate endpoint or Access Key. A Codex invocation never reads Claude Code settings, and a Claude Code invocation never reads Codex settings. File-backed credential changes are picked up on the next query. Changes made only to the process environment still require restarting the corresponding client.
+Users only configure Codex or Claude Code to use Zentrola as usual; `zentrola:usage` needs no separate endpoint or Access Key. A Codex invocation never reads Claude Code settings, and a Claude Code invocation never reads Codex settings. File-backed credential changes are picked up on the next query. Changes made only to the process environment still require restarting the corresponding client.
 
 The local MCP runs with `node` resolved from the system `PATH` and requires Node.js 18 or later.
 
