@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "zentrola",
-  "version": "0.1.0+codex.20260915141848",
-  "description": "Access Zentrola account information, including token usage and the configured service provider.",
+  "version": "0.1.0+codex.20260915143841",
+  "description": "Access Zentrola account information, including token usage and the current service provider.",
   "author": {
     "name": "Zentrola"
   },
@@ -12,7 +12,7 @@
       "interface": {
         "displayName": "Zentrola",
         "shortDescription": "View Zentrola usage and provider information.",
-        "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for Codex to query token usage and inspect the configured service provider.",
+        "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for Codex to query token usage and the current service provider.",
         "developerName": "Zentrola",
         "category": "Productivity",
         "capabilities": [

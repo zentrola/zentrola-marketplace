@@ -116,12 +116,23 @@ async function callProvider(rpc, argumentsValue = {}) {
 }
 
 async function testEnvironment(t, client, clientEnvironment) {
-  let authorization = ''
+  const requests = []
   const api = await startApi(t, (request, response) => {
-    authorization = request.headers.authorization ?? ''
+    requests.push({
+      method: request.method,
+      url: request.url,
+      authorization: request.headers.authorization ?? '',
+    })
     assert.equal(request.method, 'GET')
-    assert.equal(request.url, '/api/v1/me/usage')
-    respondJson(response, successBody())
+    if (request.url === '/api/v1/me/usage') {
+      respondJson(response, successBody())
+      return
+    }
+    if (request.url === '/api/v1/me/provider') {
+      respondJson(response, { code: 'OK', data: { name: 'Zentrola' }, requestId: 'request-1' })
+      return
+    }
+    respondJson(response, { code: 'NOT_FOUND' }, 404)
   })
   const { port } = api.address()
   const { rpc } = startMcp(t, client, { TZ: 'Asia/Shanghai', ...clientEnvironment(port) })
@@ -191,21 +202,31 @@ async function testEnvironment(t, client, clientEnvironment) {
     called.result.content[0].text,
     /Reporting period start: 2026-09-01T08:00:00\+08:00 \(Asia\/Shanghai\)/,
   )
-  assert.equal(authorization, 'Bearer vk-test-key')
-
   const provider = await callProvider(rpc)
   assert.deepEqual(provider.result.structuredContent, { providerName: 'Zentrola' })
   assert.match(provider.result.content[0].text, /Current service provider: Zentrola/)
+  assert.deepEqual(requests, [
+    {
+      method: 'GET',
+      url: '/api/v1/me/usage',
+      authorization: 'Bearer vk-test-key',
+    },
+    {
+      method: 'GET',
+      url: '/api/v1/me/provider',
+      authorization: 'Bearer vk-test-key',
+    },
+  ])
 }
 
-test('get_usage reuses the existing OpenAI-compatible environment', async (t) => {
+test('Zentrola tools reuse the existing OpenAI-compatible environment', async (t) => {
   await testEnvironment(t, 'codex', (port) => ({
     OPENAI_BASE_URL: `http://127.0.0.1:${port}/v1`,
     OPENAI_API_KEY: 'vk-test-key',
   }))
 })
 
-test('get_usage reuses the existing Anthropic-compatible environment', async (t) => {
+test('Zentrola tools reuse the existing Anthropic-compatible environment', async (t) => {
   await testEnvironment(t, 'claude', (port) => ({
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/anthropic`,
     ANTHROPIC_API_KEY: 'vk-test-key',
@@ -321,37 +342,61 @@ test('get_usage dynamically rereads Codex config.toml and auth.json for every ca
   ])
 })
 
-test('get_provider reads the active Codex provider name without contacting the backend', async (t) => {
-  const codexHome = await mkdtemp(join(tmpdir(), 'zentrola-provider-codex-'))
-  t.after(() => rm(codexHome, { recursive: true, force: true }))
-  await writeFile(
-    join(codexHome, 'config.toml'),
-    'model_provider = "zentrola"\n\n[model_providers.zentrola]\nname = "Zentrola China"\nrequires_openai_auth = true\nbase_url = "https://unused.invalid/v1"\n',
-  )
-  await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'vk-test-key' }))
-  const { rpc } = startMcp(t, 'codex', { CODEX_HOME: codexHome })
+test('get_provider returns the name from /api/v1/me/provider', async (t) => {
+  const requests = []
+  const api = await startApi(t, (request, response) => {
+    requests.push({ url: request.url, authorization: request.headers.authorization })
+    respondJson(response, {
+      code: 'OK',
+      data: { name: 'Zentrola China' },
+      requestId: 'request-1',
+    })
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-test-key',
+  })
   await initialize(rpc)
 
   const called = await callProvider(rpc)
 
   assert.deepEqual(called.result.structuredContent, { providerName: 'Zentrola China' })
   assert.match(called.result.content[0].text, /Current service provider: Zentrola China/)
+  assert.deepEqual(requests, [
+    { url: '/api/v1/me/provider', authorization: 'Bearer vk-test-key' },
+  ])
 })
 
-test('get_provider falls back to the Codex provider identifier when no display name exists', async (t) => {
-  const codexHome = await mkdtemp(join(tmpdir(), 'zentrola-provider-id-codex-'))
-  t.after(() => rm(codexHome, { recursive: true, force: true }))
-  await writeFile(
-    join(codexHome, 'config.toml'),
-    'model_provider = "zentrola"\n\n[model_providers.zentrola]\nrequires_openai_auth = true\nbase_url = "https://unused.invalid/v1"\n',
-  )
-  await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: 'vk-test-key' }))
-  const { rpc } = startMcp(t, 'codex', { CODEX_HOME: codexHome })
+test('get_provider reports HTTP status and service error code', async (t) => {
+  const api = await startApi(t, (_request, response) => {
+    respondJson(response, { code: 'INVALID_ACCESS_KEY', requestId: 'request-1' }, 401)
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-test-key',
+  })
   await initialize(rpc)
 
   const called = await callProvider(rpc)
 
-  assert.deepEqual(called.result.structuredContent, { providerName: 'zentrola' })
+  assert.equal(called.result.isError, true)
+  assert.match(called.result.content[0].text, /HTTP 401, error code INVALID_ACCESS_KEY/)
+})
+
+test('get_provider rejects invalid provider data', async (t) => {
+  const api = await startApi(t, (_request, response) => {
+    respondJson(response, { code: 'OK', data: { name: '   ' }, requestId: 'request-1' })
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-test-key',
+  })
+  await initialize(rpc)
+
+  const called = await callProvider(rpc)
+
+  assert.equal(called.result.isError, true)
+  assert.match(called.result.content[0].text, /invalid provider data/)
 })
 
 test('get_provider rejects arguments', async (t) => {

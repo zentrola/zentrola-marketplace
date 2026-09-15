@@ -50,7 +50,7 @@ const providerTool = {
   name: 'get_provider',
   title: 'Get Zentrola provider',
   description:
-    'Return the current service provider name from the active client configuration without contacting the Zentrola backend.',
+    'Query the current service provider name for the user associated with the active Zentrola Access Key.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -161,14 +161,13 @@ function parseCodexProvider(config) {
     provider[key] = value
     providers.set(providerName, provider)
   }
-  const provider = activeProvider ? providers.get(activeProvider) : undefined
-  return provider ? { id: activeProvider, config: provider } : undefined
+  return activeProvider ? providers.get(activeProvider) : undefined
 }
 
-function completePair(baseURL, apiKey, suffix, source, providerName = 'Zentrola') {
+function completePair(baseURL, apiKey, suffix, source) {
   if (typeof baseURL !== 'string' || typeof apiKey !== 'string') return undefined
   if (!baseURL.trim() || !apiKey.trim()) return undefined
-  return { baseURL: baseURL.trim(), apiKey: apiKey.trim(), suffix, source, providerName }
+  return { baseURL: baseURL.trim(), apiKey: apiKey.trim(), suffix, source }
 }
 
 function firstNonBlank(...values) {
@@ -179,10 +178,8 @@ async function pairFromCodex() {
   const codexHome = process.env.CODEX_HOME?.trim() || join(homedir(), '.codex')
   const config = await readText(join(codexHome, 'config.toml'))
   if (!config) return undefined
-  const resolvedProvider = parseCodexProvider(config)
-  if (!resolvedProvider || typeof resolvedProvider.config.base_url !== 'string') return undefined
-  const { id: providerId, config: provider } = resolvedProvider
-  const providerName = firstNonBlank(provider.name, providerId)
+  const provider = parseCodexProvider(config)
+  if (!provider || typeof provider.base_url !== 'string') return undefined
 
   if (typeof provider.env_key === 'string') {
     const pair = completePair(
@@ -190,7 +187,6 @@ async function pairFromCodex() {
       process.env[provider.env_key],
       '/v1',
       'Codex provider environment',
-      providerName,
     )
     if (pair) return pair
   }
@@ -202,7 +198,6 @@ async function pairFromCodex() {
       auth?.OPENAI_API_KEY,
       '/v1',
       'Codex config.toml and auth.json',
-      providerName,
     )
     if (pair) return pair
   }
@@ -370,7 +365,7 @@ function normalizeUsageRange(argumentsValue) {
   return { from: from.timestamp, to: to.timestamp }
 }
 
-function usageEndpoint(baseURL, suffix, range) {
+function meEndpoint(baseURL, suffix, resource) {
   let url
   try {
     url = new URL(baseURL)
@@ -386,7 +381,12 @@ function usageEndpoint(baseURL, suffix, range) {
   if (path.toLowerCase().endsWith(suffix)) {
     path = path.slice(0, -suffix.length)
   }
-  url.pathname = `${path}/api/v1/me/usage`.replace(/\/{2,}/g, '/')
+  url.pathname = `${path}/api/v1/me/${resource}`.replace(/\/{2,}/g, '/')
+  return url
+}
+
+function usageEndpoint(baseURL, suffix, range) {
+  const url = meEndpoint(baseURL, suffix, 'usage')
   if (range) {
     url.searchParams.set('from', range.from)
     url.searchParams.set('to', range.to)
@@ -464,7 +464,36 @@ async function getProvider(argumentsValue) {
   if (Object.keys(argumentsValue).length > 0) {
     throw new Error('get_provider does not accept arguments.')
   }
-  const { providerName } = await pairFromCurrentClient()
+  const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
+  const endpoint = meEndpoint(baseURL, suffix, 'provider')
+  let response
+  try {
+    response = await fetch(endpoint, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch (error) {
+    if (error?.name === 'TimeoutError') {
+      throw new Error('The connection to Zentrola timed out.')
+    }
+    throw new Error('Unable to connect to the Zentrola service.')
+  }
+
+  let body
+  try {
+    body = await response.json()
+  } catch {
+    throw new Error(`Zentrola returned an unreadable response (HTTP ${response.status}).`)
+  }
+  if (!response.ok) {
+    const code = typeof body?.code === 'string' ? `, error code ${body.code}` : ''
+    throw new Error(`The Zentrola provider query failed (HTTP ${response.status}${code}).`)
+  }
+  if (typeof body?.data?.name !== 'string' || !body.data.name.trim()) {
+    throw new Error('Zentrola returned invalid provider data.')
+  }
+
+  const providerName = body.data.name.trim()
   return {
     content: [{ type: 'text', text: `Current service provider: ${providerName}` }],
     structuredContent: { providerName },
@@ -488,7 +517,7 @@ async function handle(request) {
           capabilities: { tools: { listChanged: false } },
           serverInfo,
           instructions:
-            'Use get_usage for token consumption and get_provider for the configured service provider name. Both tools are read-only and reuse the active client configuration.',
+            'Use get_usage for token consumption and get_provider for the current service provider name. Both tools are read-only and reuse the active client configuration.',
         },
       })
       return
