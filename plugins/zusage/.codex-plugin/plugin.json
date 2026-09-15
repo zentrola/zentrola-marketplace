@@ -1,6 +1,6 @@
 {
   "name": "zusage",
-  "version": "0.1.0+codex.20260915082716",
+  "version": "0.1.0+codex.20260915094748",
   "description": "Query the current Zentrola user's token usage for the current month and reporting period.",
   "author": {
     "name": "Zentrola"

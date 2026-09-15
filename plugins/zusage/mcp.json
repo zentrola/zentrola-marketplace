@@ -4,8 +4,8 @@
     "zentrola_usage": {
       "type": "stdio",
       "command": "node",
-      "args": ["scripts/zusage-mcp.mjs", "--client=codex"],
-      "cwd": "."
+      "args": ["./scripts/zusage-mcp.mjs", "--client=codex"],
+      "cwd": "./"
     }
   }
 }

@@ -360,8 +360,8 @@ test('client-specific MCP manifests pass explicit launch arguments', async () =>
   assert.deepEqual(codexManifest.mcpServers.zentrola_usage, {
     type: 'stdio',
     command: 'node',
-    args: ['scripts/zusage-mcp.mjs', '--client=codex'],
-    cwd: '.',
+    args: ['./scripts/zusage-mcp.mjs', '--client=codex'],
+    cwd: './',
   })
   assert.deepEqual(claudeManifest.mcpServers.zentrola_usage.args, [
     '${CLAUDE_PLUGIN_ROOT}/scripts/zusage-mcp.mjs',
