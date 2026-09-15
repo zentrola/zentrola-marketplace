@@ -8,12 +8,12 @@ Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可查�
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
-| Claude Code | `/zusage` 查询用量；`/zprovider` 查询服务商 |
-| Codex | `$zentrola:usage` 或 `$zentrola:provider` |
+| Claude Code | `/zusage` 查询用量；`/zprovider gpt-5.6-sol` 查询服务商 |
+| Codex | `$zentrola:usage` 或 `$zentrola:provider gpt-5.6-sol` |
 
 Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法 `$zentrola:usage` 和 `$zentrola:provider`。Claude Code 保留 `/zusage` 和 `/zprovider` 包装层，两端使用插件中相同的 Skill。
 
-默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。服务商查询调用 `/api/v1/me/provider`，并返回服务端提供的 `data.name`。
+默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。服务商查询调用 `/api/v1/me/provider?model=<model>`，并返回服务端提供的 `data.name`。
 
 ## 目录结构
 

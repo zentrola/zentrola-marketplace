@@ -50,18 +50,25 @@ const providerTool = {
   name: 'get_provider',
   title: 'Get Zentrola provider',
   description:
-    'Query the current service provider name for the user associated with the active Zentrola Access Key.',
+    'Query the current service provider name for a model using the active Zentrola Access Key.',
   inputSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      model: {
+        type: 'string',
+        minLength: 1,
+        description: 'Model identifier to resolve, for example gpt-5.6-sol.',
+      },
+    },
+    required: ['model'],
     additionalProperties: false,
   },
   outputSchema: {
     type: 'object',
     properties: {
-      providerName: { type: 'string' },
+      name: { type: 'string' },
     },
-    required: ['providerName'],
+    required: ['name'],
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -461,11 +468,16 @@ async function getProvider(argumentsValue) {
   ) {
     throw new Error('get_provider arguments must be an object.')
   }
-  if (Object.keys(argumentsValue).length > 0) {
-    throw new Error('get_provider does not accept arguments.')
+  const keys = Object.keys(argumentsValue)
+  if (keys.some((key) => key !== 'model')) {
+    throw new Error('get_provider accepts only model.')
+  }
+  if (typeof argumentsValue.model !== 'string' || !argumentsValue.model.trim()) {
+    throw new Error('get_provider model must be a non-empty string.')
   }
   const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
   const endpoint = meEndpoint(baseURL, suffix, 'provider')
+  endpoint.searchParams.set('model', argumentsValue.model.trim())
   let response
   try {
     response = await fetch(endpoint, {
@@ -493,10 +505,10 @@ async function getProvider(argumentsValue) {
     throw new Error('Zentrola returned invalid provider data.')
   }
 
-  const providerName = body.data.name.trim()
+  const name = body.data.name.trim()
   return {
-    content: [{ type: 'text', text: `Current service provider: ${providerName}` }],
-    structuredContent: { providerName },
+    content: [{ type: 'text', text: `Current service provider: ${name}` }],
+    structuredContent: { name },
   }
 }
 
@@ -517,7 +529,7 @@ async function handle(request) {
           capabilities: { tools: { listChanged: false } },
           serverInfo,
           instructions:
-            'Use get_usage for token consumption and get_provider for the current service provider name. Both tools are read-only and reuse the active client configuration.',
+            'Use get_usage for token consumption and get_provider with a model identifier for the current service provider name. Both tools are read-only and reuse the active client configuration.',
         },
       })
       return

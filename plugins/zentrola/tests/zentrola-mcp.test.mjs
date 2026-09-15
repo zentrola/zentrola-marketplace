@@ -111,7 +111,7 @@ async function callUsage(rpc, argumentsValue = {}) {
   return rpc(3, 'tools/call', { name: 'get_usage', arguments: argumentsValue })
 }
 
-async function callProvider(rpc, argumentsValue = {}) {
+async function callProvider(rpc, argumentsValue = { model: 'gpt-5.6-sol' }) {
   return rpc(4, 'tools/call', { name: 'get_provider', arguments: argumentsValue })
 }
 
@@ -128,7 +128,7 @@ async function testEnvironment(t, client, clientEnvironment) {
       respondJson(response, successBody())
       return
     }
-    if (request.url === '/api/v1/me/provider') {
+    if (request.url === '/api/v1/me/provider?model=gpt-5.6-sol') {
       respondJson(response, { code: 'OK', data: { name: 'Zentrola' }, requestId: 'request-1' })
       return
     }
@@ -178,15 +178,22 @@ async function testEnvironment(t, client, clientEnvironment) {
   })
   assert.deepEqual(listed.result.tools[1].inputSchema, {
     type: 'object',
-    properties: {},
+    properties: {
+      model: {
+        type: 'string',
+        minLength: 1,
+        description: 'Model identifier to resolve, for example gpt-5.6-sol.',
+      },
+    },
+    required: ['model'],
     additionalProperties: false,
   })
   assert.deepEqual(listed.result.tools[1].outputSchema, {
     type: 'object',
     properties: {
-      providerName: { type: 'string' },
+      name: { type: 'string' },
     },
-    required: ['providerName'],
+    required: ['name'],
     additionalProperties: false,
   })
 
@@ -203,7 +210,7 @@ async function testEnvironment(t, client, clientEnvironment) {
     /Reporting period start: 2026-09-01T08:00:00\+08:00 \(Asia\/Shanghai\)/,
   )
   const provider = await callProvider(rpc)
-  assert.deepEqual(provider.result.structuredContent, { providerName: 'Zentrola' })
+  assert.deepEqual(provider.result.structuredContent, { name: 'Zentrola' })
   assert.match(provider.result.content[0].text, /Current service provider: Zentrola/)
   assert.deepEqual(requests, [
     {
@@ -213,7 +220,7 @@ async function testEnvironment(t, client, clientEnvironment) {
     },
     {
       method: 'GET',
-      url: '/api/v1/me/provider',
+      url: '/api/v1/me/provider?model=gpt-5.6-sol',
       authorization: 'Bearer vk-test-key',
     },
   ])
@@ -342,7 +349,7 @@ test('get_usage dynamically rereads Codex config.toml and auth.json for every ca
   ])
 })
 
-test('get_provider returns the name from /api/v1/me/provider', async (t) => {
+test('get_provider passes model and returns data.name from /api/v1/me/provider', async (t) => {
   const requests = []
   const api = await startApi(t, (request, response) => {
     requests.push({ url: request.url, authorization: request.headers.authorization })
@@ -358,12 +365,15 @@ test('get_provider returns the name from /api/v1/me/provider', async (t) => {
   })
   await initialize(rpc)
 
-  const called = await callProvider(rpc)
+  const called = await callProvider(rpc, { model: 'gpt-5.6-sol' })
 
-  assert.deepEqual(called.result.structuredContent, { providerName: 'Zentrola China' })
+  assert.deepEqual(called.result.structuredContent, { name: 'Zentrola China' })
   assert.match(called.result.content[0].text, /Current service provider: Zentrola China/)
   assert.deepEqual(requests, [
-    { url: '/api/v1/me/provider', authorization: 'Bearer vk-test-key' },
+    {
+      url: '/api/v1/me/provider?model=gpt-5.6-sol',
+      authorization: 'Bearer vk-test-key',
+    },
   ])
 })
 
@@ -399,17 +409,24 @@ test('get_provider rejects invalid provider data', async (t) => {
   assert.match(called.result.content[0].text, /invalid provider data/)
 })
 
-test('get_provider rejects arguments', async (t) => {
+test('get_provider validates model before contacting Zentrola', async (t) => {
   const { rpc } = startMcp(t, 'codex', {
     OPENAI_BASE_URL: 'https://unused.invalid/v1',
     OPENAI_API_KEY: 'vk-test-key',
   })
   await initialize(rpc)
 
-  const called = await callProvider(rpc, { unexpected: true })
-
-  assert.equal(called.result.isError, true)
-  assert.match(called.result.content[0].text, /does not accept arguments/)
+  const cases = [
+    [{}, /model must be a non-empty string/],
+    [{ model: '' }, /model must be a non-empty string/],
+    [{ model: 123 }, /model must be a non-empty string/],
+    [{ model: 'gpt-5.6-sol', unexpected: true }, /accepts only model/],
+  ]
+  for (const [argumentsValue, expectedError] of cases) {
+    const called = await callProvider(rpc, argumentsValue)
+    assert.equal(called.result.isError, true)
+    assert.match(called.result.content[0].text, expectedError)
+  }
 })
 
 test('get_usage reads the existing Claude Code settings.json', async (t) => {

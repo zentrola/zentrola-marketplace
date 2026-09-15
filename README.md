@@ -8,12 +8,12 @@ The Zentrola marketplace for plugins and skills. It currently contains the `zent
 
 | Client | How to invoke after installation |
 | --- | --- |
-| Claude Code | `/zusage` for usage; `/zprovider` for the provider |
-| Codex | `$zentrola:usage` or `$zentrola:provider` |
+| Claude Code | `/zusage` for usage; `/zprovider gpt-5.6-sol` for the provider |
+| Codex | `$zentrola:usage` or `$zentrola:provider gpt-5.6-sol` |
 
 Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses the namespaced native skill syntax `$zentrola:usage` and `$zentrola:provider`. Claude Code keeps `/zusage` and `/zprovider` wrappers. Both clients use the same skills packaged by the plugin.
 
-With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin. Provider queries call `/api/v1/me/provider` and return the service-provided `data.name` value.
+With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin. Provider queries call `/api/v1/me/provider?model=<model>` and return the service-provided `data.name` value.
 
 ## Directory structure
 
