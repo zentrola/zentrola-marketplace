@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "zusage",
-  "version": "0.1.0+codex.20260915073839",
+  "version": "0.1.0+codex.20260915082716",
   "description": "Query the current Zentrola user's token usage for the current month and reporting period.",
   "author": {
     "name": "Zentrola"

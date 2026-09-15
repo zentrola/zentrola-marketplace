@@ -5,8 +5,7 @@
       "type": "stdio",
       "command": "node",
       "args": ["scripts/zusage-mcp.mjs", "--client=codex"],
-      "cwd": ".",
-      "env_vars": ["CODEX_HOME", "OPENAI_BASE_URL", "OPENAI_API_KEY"]
+      "cwd": "."
     }
   }
 }

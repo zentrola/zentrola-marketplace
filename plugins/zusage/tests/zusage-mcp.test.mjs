@@ -357,17 +357,12 @@ test('client-specific MCP manifests pass explicit launch arguments', async () =>
     portablePlugin.$schema,
     'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
   )
-  assert.deepEqual(codexManifest.mcpServers.zentrola_usage.args, [
-    'scripts/zusage-mcp.mjs',
-    '--client=codex',
-  ])
-  assert.equal(codexManifest.mcpServers.zentrola_usage.type, 'stdio')
-  assert.equal(codexManifest.mcpServers.zentrola_usage.cwd, '.')
-  assert.deepEqual(codexManifest.mcpServers.zentrola_usage.env_vars, [
-    'CODEX_HOME',
-    'OPENAI_BASE_URL',
-    'OPENAI_API_KEY',
-  ])
+  assert.deepEqual(codexManifest.mcpServers.zentrola_usage, {
+    type: 'stdio',
+    command: 'node',
+    args: ['scripts/zusage-mcp.mjs', '--client=codex'],
+    cwd: '.',
+  })
   assert.deepEqual(claudeManifest.mcpServers.zentrola_usage.args, [
     '${CLAUDE_PLUGIN_ROOT}/scripts/zusage-mcp.mjs',
     '--client=claude',
