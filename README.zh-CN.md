@@ -8,10 +8,10 @@ Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可查�
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
-| Claude Code | `/zusage` 查询用量；`/zprovider gpt-5.6-sol` 查询服务商 |
+| Claude Code | `/usage` 查询用量；`/provider gpt-5.6-sol` 查询服务商 |
 | Codex | `$zentrola:usage` 或 `$zentrola:provider gpt-5.6-sol` |
 
-Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法 `$zentrola:usage` 和 `$zentrola:provider`。Claude Code 保留 `/zusage` 和 `/zprovider` 包装层，两端使用插件中相同的 Skill。
+Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法 `$zentrola:usage` 和 `$zentrola:provider`。Claude Code 使用 `/usage` 和 `/provider` 包装层，两端使用插件中相同的 Skill。
 
 默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。服务商查询调用 `/api/v1/me/provider?model=<model>`，并返回服务端提供的 `data.name`。
 
@@ -28,8 +28,8 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
     ├── .mcp.json                         # Claude MCP 启动配置（--client=claude）
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
-    ├── commands/zusage.md                # Claude /zusage
-    ├── commands/zprovider.md             # Claude /zprovider
+    ├── commands/usage.md                 # Claude /usage
+    ├── commands/provider.md              # Claude /provider
     ├── scripts/zentrola-mcp.mjs          # 统一的 Zentrola MCP server
     └── skills
         ├── usage                         # Token 用量查询流程
@@ -39,6 +39,36 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
             ├── SKILL.md
             └── agents/openai.yaml
 ```
+
+## 开发 Plugin 与 Skill
+
+本仓库同时作为新增 Plugin 和 Skill 的开发样板。请参考 `plugins/zentrola`，并将
+每个插件完整放在 `plugins/<plugin-name>/` 下，保持插件之间相互独立。
+
+- `plugin.json` 是跨客户端的 Plugin 清单；`.codex-plugin/plugin.json` 与
+  `.claude-plugin/plugin.json` 是客户端专用清单。插件名称、版本、说明或客户端展示信息变化
+  时，应同步检查并更新对应清单；如果客户端要求不同的版本格式，可以保留格式差异。
+- 在 `skills/<skill-name>/SKILL.md` 中新增 Skill。YAML front matter 必须包含 Skill 的
+  `name` 和准确的 `description`；需要 Codex 专用元数据时，再添加
+  `agents/openai.yaml`。
+- `commands/` 用于 Claude Code 的 slash command 包装层。Codex 使用带插件命名空间的
+  Skill 语法（例如 `$plugin-name:skill-name`），不使用自定义 slash command。
+- 共享 MCP 或其他运行时代码放在 `scripts/`；客户端需要不同启动参数时，Codex 使用
+  `mcp.json`，Claude Code 使用 `.mcp.json`。
+- 新插件必须同时登记到 `.agents/plugins/marketplace.json` 和
+  `.claude-plugin/marketplace.json`，这样两个客户端都能发现它。
+
+新增插件时，可以复制 `plugins/zentrola` 的目录结构，再替换名称、版本、说明、清单、
+commands、skills 和 tests，并删除不需要的文件。不要把凭据写入源码、prompt、测试数据
+或日志。在 `plugins/<plugin-name>/tests/` 下补充运行时测试，并使用 Node 内置测试运行器
+执行，例如：
+
+```text
+node --test plugins/<plugin-name>/tests/*.test.mjs
+```
+
+Marketplace 的目录结构或客户端安装行为发生变化时，请同步更新本文件和
+`README.md`。
 
 ## 安装
 

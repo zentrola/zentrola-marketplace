@@ -1,6 +1,6 @@
 ---
 name: usage
-description: Query Zentrola token usage for the current month or a user-requested date range, including the reporting period, for the user associated with the active Access Key. Use when the user asks about Zentrola usage, asks how many tokens they used during a period, or explicitly invokes $zentrola:usage. Claude can trigger it through /zusage.
+description: Query Zentrola token usage for the current month or a user-requested date range, including the reporting period, for the user associated with the active Access Key. Use when the user asks about Zentrola usage, asks how many tokens they used during a period, or explicitly invokes $zentrola:usage. Claude can trigger it through /usage.
 ---
 
 # Query usage

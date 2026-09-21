@@ -1,6 +1,6 @@
 ---
 name: provider
-description: Query the Zentrola service provider name for a model using the active Access Key. Use when the user asks which provider serves a model, asks for the current model's provider, or explicitly invokes $zentrola:provider. Claude can trigger it through /zprovider.
+description: Query the Zentrola service provider name for a model using the active Access Key. Use when the user asks which provider serves a model, asks for the current model's provider, or explicitly invokes $zentrola:provider. Claude can trigger it through /provider.
 ---
 
 # Query provider

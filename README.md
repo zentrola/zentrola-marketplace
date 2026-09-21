@@ -8,10 +8,10 @@ The Zentrola marketplace for plugins and skills. It currently contains the `zent
 
 | Client | How to invoke after installation |
 | --- | --- |
-| Claude Code | `/zusage` for usage; `/zprovider gpt-5.6-sol` for the provider |
+| Claude Code | `/usage` for usage; `/provider gpt-5.6-sol` for the provider |
 | Codex | `$zentrola:usage` or `$zentrola:provider gpt-5.6-sol` |
 
-Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses the namespaced native skill syntax `$zentrola:usage` and `$zentrola:provider`. Claude Code keeps `/zusage` and `/zprovider` wrappers. Both clients use the same skills packaged by the plugin.
+Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses the namespaced native skill syntax `$zentrola:usage` and `$zentrola:provider`. Claude Code uses `/usage` and `/provider` wrappers. Both clients use the same skills packaged by the plugin.
 
 With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin. Provider queries call `/api/v1/me/provider?model=<model>` and return the service-provided `data.name` value.
 
@@ -28,8 +28,8 @@ With no parameters, the plugin queries from the start of the current UTC calenda
     ├── .mcp.json                         # Claude MCP launcher (--client=claude)
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
-    ├── commands/zusage.md                # Claude /zusage command
-    ├── commands/zprovider.md             # Claude /zprovider command
+    ├── commands/usage.md                 # Claude /usage command
+    ├── commands/provider.md              # Claude /provider command
     ├── scripts/zentrola-mcp.mjs          # Shared Zentrola MCP server
     └── skills
         ├── usage                         # Token usage workflow
@@ -39,6 +39,39 @@ With no parameters, the plugin queries from the start of the current UTC calenda
             ├── SKILL.md
             └── agents/openai.yaml
 ```
+
+## Developing plugins and skills
+
+This repository also serves as a starter template for new plugins and skills. Use
+`plugins/zentrola` as the reference implementation and keep each plugin self-contained
+under `plugins/<plugin-name>/`.
+
+- `plugin.json` is the portable plugin manifest. Update the client-specific manifests in
+  `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` whenever the plugin name,
+  version, description, or client-facing metadata changes; client-specific version formats
+  may differ when required by that client.
+- Add a skill under `skills/<skill-name>/SKILL.md`. The YAML front matter must include
+  the skill `name` and a precise `description`; add `agents/openai.yaml` when the skill
+  needs Codex-specific metadata.
+- Put Claude Code slash-command wrappers in `commands/`. Codex invokes namespaced
+  skills such as `$plugin-name:skill-name` and does not use custom slash commands.
+- Put shared MCP or other runtime code in `scripts/`, and use `mcp.json` for Codex and
+  `.mcp.json` for Claude Code when the clients need different launch arguments.
+- Register every new plugin in both `.agents/plugins/marketplace.json` and
+  `.claude-plugin/marketplace.json` so it is discoverable by both clients.
+
+When adding a plugin, copy the `plugins/zentrola` layout, replace its name, version,
+description, manifests, commands, skills, and tests, then remove files that are not
+needed. Keep credentials out of source, prompts, fixtures, and logs. Add runtime tests
+under `plugins/<plugin-name>/tests/` and run them with Node's built-in test runner, for
+example:
+
+```text
+node --test plugins/<plugin-name>/tests/*.test.mjs
+```
+
+Update this README and `README.zh-CN.md` when the marketplace layout or client
+installation behavior changes.
 
 ## Installation
 
