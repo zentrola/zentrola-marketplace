@@ -57,7 +57,7 @@ For example, `grill-me` is currently registered as:
 ```text
 repository: https://github.com/mattpocock/skills.git
 path: skills/productivity/grill-me
-ref: c55ee46073ed923f86ce59a5eb3b6d895d1b7
+ref: main
 ```
 
 Ask for `grill-me` after installing the Zentrola plugin to receive the source location

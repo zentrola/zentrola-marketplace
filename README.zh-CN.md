@@ -56,7 +56,7 @@ Claude Code 客户端完成。
 ```text
 repository: https://github.com/mattpocock/skills.git
 path: skills/productivity/grill-me
-ref: c55ee46073ed923f86ce59a5eb3b6d895d1b7
+ref: main
 ```
 
 安装 Zentrola 插件后，用户可以直接说“找一下 grill-me”或“找一下压力测试方案”，
