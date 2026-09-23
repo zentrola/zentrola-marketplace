@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "skills": [
+    {
+      "name": "grill-me",
+      "aliases": [
+        "grill me",
+        "grill-me 技能",
+        "压力测试方案",
+        "方案拷问"
+      ],
+      "type": "skill",
+      "clients": [
+        "codex",
+        "claude-code"
+      ],
+      "repository": "https://github.com/mattpocock/skills.git",
+      "path": "skills/productivity/grill-me",
+      "ref": "c55ee46073ed923f86ce59a5eb3b6d895095d1b7",
+      "description": "A relentless interview to sharpen a plan or design."
+    }
+  ]
+}

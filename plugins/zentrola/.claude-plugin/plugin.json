@@ -1,6 +1,6 @@
 {
   "name": "zentrola",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Access Zentrola account information, including token usage and the current service provider.",
   "author": {
     "name": "Zentrola"

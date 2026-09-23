@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可查询 Token 使用量和当前 Zentrola 服务商。
+Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可查询 Token 使用量、当前 Zentrola 服务商，并提供第三方 Skill 推荐入口。
 
 ## 客户端入口
 
@@ -31,14 +31,36 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
     ├── commands/usage.md                 # Claude /usage
     ├── commands/provider.md              # Claude /provider
     ├── scripts/zentrola-mcp.mjs          # 统一的 Zentrola MCP server
-    └── skills
-        ├── usage                         # Token 用量查询流程
-        │   ├── SKILL.md
-        │   └── agents/openai.yaml
-        └── provider                      # 服务商查询流程
-            ├── SKILL.md
-            └── agents/openai.yaml
+    ├── skills
+    │   ├── usage                         # Token 用量查询流程
+    │   │   ├── SKILL.md
+    │   │   └── agents/openai.yaml
+    │   ├── provider                      # 服务商查询流程
+    │   │   ├── SKILL.md
+    │   │   └── agents/openai.yaml
+    │   └── recommended                   # 第三方 Skill 推荐入口
+    │       └── SKILL.md
+    └── catalog
+        └── recommended-skills.json       # 仅保存第三方来源元数据
 ```
+
+## 第三方 Skill 推荐
+
+`recommended` Skill 是目录和快捷入口，不是包管理器。它会根据名称或别名读取
+`plugins/zentrola/catalog/recommended-skills.json`，告诉客户端目标 Skill 或 Plugin
+所在的上游仓库。Zentrola 不复制或执行第三方代码，实际安装和加载仍由 Codex 或
+Claude Code 客户端完成。
+
+例如，当前已登记 `grill-me`：
+
+```text
+repository: https://github.com/mattpocock/skills.git
+path: skills/productivity/grill-me
+ref: c55ee46073ed923f86ce59a5eb3b6d895d1b7
+```
+
+安装 Zentrola 插件后，用户可以直接说“找一下 grill-me”或“找一下压力测试方案”，
+获得来源位置和对应客户端的下一步指引。
 
 ## 开发 Plugin 与 Skill
 

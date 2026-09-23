@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "zentrola",
-  "version": "0.1.0+codex.20260915145239",
+  "version": "0.1.1+codex.20260923",
   "description": "Access Zentrola account information, including token usage and the current service provider.",
   "author": {
     "name": "Zentrola"

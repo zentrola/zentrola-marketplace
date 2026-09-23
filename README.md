@@ -2,7 +2,7 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose skills query token usage and the current Zentrola service provider.
+The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose skills query token usage, the current Zentrola service provider, and recommended third-party skills.
 
 ## Client entry points
 
@@ -31,14 +31,37 @@ With no parameters, the plugin queries from the start of the current UTC calenda
     ├── commands/usage.md                 # Claude /usage command
     ├── commands/provider.md              # Claude /provider command
     ├── scripts/zentrola-mcp.mjs          # Shared Zentrola MCP server
-    └── skills
-        ├── usage                         # Token usage workflow
-        │   ├── SKILL.md
-        │   └── agents/openai.yaml
-        └── provider                      # Provider lookup workflow
-            ├── SKILL.md
-            └── agents/openai.yaml
+    ├── skills
+    │   ├── usage                         # Token usage workflow
+    │   │   ├── SKILL.md
+    │   │   └── agents/openai.yaml
+    │   ├── provider                      # Provider lookup workflow
+    │   │   ├── SKILL.md
+    │   │   └── agents/openai.yaml
+    │   └── recommended                   # Third-party Skill directory shortcut
+    │       └── SKILL.md
+    └── catalog
+        └── recommended-skills.json       # Third-party source metadata only
 ```
+
+## Recommended third-party skills
+
+The `recommended` Skill is a directory and shortcut, not a package manager. It matches a
+name or alias in `plugins/zentrola/catalog/recommended-skills.json` and tells the client
+where the upstream Skill or Plugin lives. Zentrola does not copy or execute third-party
+code; Codex or Claude Code remains responsible for the actual installation and loading
+flow.
+
+For example, `grill-me` is currently registered as:
+
+```text
+repository: https://github.com/mattpocock/skills.git
+path: skills/productivity/grill-me
+ref: c55ee46073ed923f86ce59a5eb3b6d895d1b7
+```
+
+Ask for `grill-me` after installing the Zentrola plugin to receive the source location
+and the client-specific next step.
 
 ## Developing plugins and skills
 
