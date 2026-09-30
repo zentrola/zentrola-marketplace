@@ -2,18 +2,20 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose skills query token usage, the current Zentrola service provider, and recommended third-party skills.
+The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose skills generate images directly through Zentrola, query token usage and the current service provider, and recommend third-party skills.
 
 ## Client entry points
 
 | Client | How to invoke after installation |
 | --- | --- |
-| Claude Code | `/usage` for usage; `/provider gpt-5.6-sol` for the provider |
-| Codex | `$zentrola:usage` or `$zentrola:provider gpt-5.6-sol` |
+| Claude Code | `/imagegen <description>` for an image; `/usage` for usage; `/provider gpt-5.6-sol` for the provider |
+| Codex | `$zentrola:imagegen <description>`, `$zentrola:usage`, or `$zentrola:provider gpt-5.6-sol` |
 
-Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses the namespaced native skill syntax `$zentrola:usage` and `$zentrola:provider`. Claude Code uses `/usage` and `/provider` wrappers. Both clients use the same skills packaged by the plugin.
+Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses namespaced native skill syntax such as `$zentrola:imagegen`. Claude Code uses wrappers such as `/imagegen`. Both clients use the same skills packaged by the plugin.
 
 With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin. Provider queries call `/api/v1/me/provider?model=<model>` and return the service-provided `data.name` value.
+
+The image tool calls Zentrola's `/v1/responses` endpoint directly and does not access the ChatGPT Codex upstream. Requests always use `store: false`, `stream: true`, and the `image_generation` tool. The default model is `gpt-5.6-sol`, while callers may explicitly select another model. The MCP incrementally reads the SSE stream, takes the PNG from the completed event's `result` or the latest `partial_image_b64`, validates it, and returns native MCP `image` content. The parser has no fixed 64 KiB line limit and supports multi-megabyte image events.
 
 ## Directory structure
 
@@ -28,10 +30,14 @@ With no parameters, the plugin queries from the start of the current UTC calenda
     ├── .mcp.json                         # Claude MCP launcher (--client=claude)
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
+    ├── commands/imagegen.md              # Claude /imagegen command
     ├── commands/usage.md                 # Claude /usage command
     ├── commands/provider.md              # Claude /provider command
     ├── scripts/zentrola-mcp.mjs          # Shared Zentrola MCP server
     ├── skills
+    │   ├── imagegen                      # Zentrola image generation workflow
+    │   │   ├── SKILL.md
+    │   │   └── agents/openai.yaml
     │   ├── usage                         # Token usage workflow
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml
@@ -124,7 +130,7 @@ Codex and Claude Code use separate MCP manifests. Each manifest passes an explic
 - Claude Code: reads `ANTHROPIC_BASE_URL` together with `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` from the current process environment or `~/.claude/settings.json`.
 - Codex environment fallback: `OPENAI_BASE_URL` and `OPENAI_API_KEY`.
 
-Users only configure Codex or Claude Code to use Zentrola as usual; `zentrola:usage` needs no separate endpoint or Access Key. A Codex invocation never reads Claude Code settings, and a Claude Code invocation never reads Codex settings. File-backed credential changes are picked up on the next query. Changes made only to the process environment still require restarting the corresponding client.
+Users only configure Codex or Claude Code to use Zentrola as usual; `zentrola:imagegen` and `zentrola:usage` need no separate endpoint or Access Key. A Codex invocation never reads Claude Code settings, and a Claude Code invocation never reads Codex settings. File-backed credential changes are picked up on the next call. Changes made only to the process environment still require restarting the corresponding client.
 
 The local MCP runs with `node` resolved from the system `PATH` and requires Node.js 18 or later.
 

@@ -1,7 +1,7 @@
 {
   "name": "zentrola",
-  "version": "0.1.1+codex.20260923",
-  "description": "Access Zentrola account information, including token usage and the current service provider.",
+  "version": "0.2.0+codex.20260930",
+  "description": "Generate images and access Zentrola account information, including token usage and the current service provider.",
   "author": {
     "name": "Zentrola"
   },
@@ -19,14 +19,15 @@
   },
   "interface": {
     "displayName": "Zentrola",
-    "shortDescription": "View Zentrola usage and provider information.",
-    "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for the current client to query token usage and the current service provider.",
+    "shortDescription": "Generate images and view Zentrola account information.",
+    "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for the current client to generate PNG images, query token usage, and identify the current service provider.",
     "developerName": "Zentrola",
     "category": "Productivity",
     "capabilities": [
       "Read"
     ],
     "defaultPrompt": [
+      "Use $zentrola:imagegen to generate a PNG image from my description.",
       "Use $zentrola:usage to query my current-month Zentrola token usage.",
       "Use $zentrola:provider to show my current Zentrola service provider."
     ]

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola', version: '0.1.0' }
+const serverInfo = { name: 'zentrola', version: '0.2.0' }
 const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
@@ -74,7 +74,43 @@ const providerTool = {
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 }
 
-const tools = [usageTool, providerTool]
+const imageGenerationTool = {
+  name: 'generate_image',
+  title: 'Generate an image with Zentrola',
+  description:
+    'Generate a PNG image through Zentrola. The prompt should fully describe the desired image, including style, composition, dimensions, and background requirements.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      prompt: {
+        type: 'string',
+        minLength: 1,
+        description: 'A complete natural-language description of the image to generate.',
+      },
+      model: {
+        type: 'string',
+        minLength: 1,
+        default: 'gpt-5.6-sol',
+        description: 'Zentrola model identifier. Defaults to gpt-5.6-sol.',
+      },
+    },
+    required: ['prompt'],
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      model: { type: 'string' },
+      mimeType: { type: 'string', const: 'image/png' },
+      bytes: { type: 'integer', minimum: 1 },
+    },
+    required: ['model', 'mimeType', 'bytes'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+}
+
+const tools = [usageTool, providerTool, imageGenerationTool]
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -220,6 +256,17 @@ function pairFromOpenAIEnvironment() {
   )
 }
 
+function pairFromZentrolaEnvironment() {
+  const apiKey = process.env.ZENTROLA_VIRTUAL_KEY
+  if (typeof apiKey !== 'string' || !apiKey.trim()) return undefined
+  return completePair(
+    process.env.ZENTROLA_BASE_URL?.trim() || 'http://127.0.0.1:9527/v1',
+    apiKey,
+    '/v1',
+    'Zentrola environment',
+  )
+}
+
 async function pairFromClaude() {
   const environmentPair = completePair(
     process.env.ANTHROPIC_BASE_URL,
@@ -262,6 +309,8 @@ function clientFromArguments() {
 async function pairFromCurrentClient() {
   // Resolve credentials afresh for every tool call so rotations are picked up without plugin changes.
   const client = clientFromArguments()
+  const directPair = pairFromZentrolaEnvironment()
+  if (directPair) return directPair
   const pair =
     client === 'codex'
       ? (await pairFromCodex()) ?? pairFromOpenAIEnvironment()
@@ -401,6 +450,186 @@ function usageEndpoint(baseURL, suffix, range) {
   return url
 }
 
+function responsesEndpoint(baseURL, suffix) {
+  let url
+  try {
+    url = new URL(baseURL)
+  } catch {
+    throw new Error('The Zentrola Base URL is invalid.')
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('The Zentrola Base URL must be an HTTP(S) URL without embedded credentials.')
+  }
+  url.search = ''
+  url.hash = ''
+  let path = url.pathname.replace(/\/+$/, '')
+  if (path.toLowerCase().endsWith(suffix)) {
+    path = path.slice(0, -suffix.length)
+  }
+  url.pathname = `${path}/v1/responses`.replace(/\/{2,}/g, '/')
+  return url
+}
+
+function normalizeImageArguments(argumentsValue) {
+  if (
+    argumentsValue === null ||
+    typeof argumentsValue !== 'object' ||
+    Array.isArray(argumentsValue)
+  ) {
+    throw new Error('generate_image arguments must be an object.')
+  }
+  const unknown = Object.keys(argumentsValue).filter(
+    (key) => key !== 'prompt' && key !== 'model',
+  )
+  if (unknown.length > 0) {
+    throw new Error('generate_image accepts only prompt and model.')
+  }
+  if (typeof argumentsValue.prompt !== 'string' || !argumentsValue.prompt.trim()) {
+    throw new Error('generate_image prompt must be a non-empty string.')
+  }
+  if (
+    Object.hasOwn(argumentsValue, 'model') &&
+    (typeof argumentsValue.model !== 'string' || !argumentsValue.model.trim())
+  ) {
+    throw new Error('generate_image model must be a non-empty string when provided.')
+  }
+  return {
+    prompt: argumentsValue.prompt.trim(),
+    model: argumentsValue.model?.trim() || 'gpt-5.6-sol',
+  }
+}
+
+function updateImageData(value, state) {
+  if (!value || typeof value !== 'object') return
+  if (typeof value.partial_image_b64 === 'string' && value.partial_image_b64) {
+    state.imageBase64 = value.partial_image_b64
+  }
+  if (typeof value.result === 'string' && value.result) {
+    state.imageBase64 = value.result
+  }
+  for (const key of ['item', 'response', 'output', 'content']) {
+    const nested = value[key]
+    if (Array.isArray(nested)) {
+      for (const entry of nested) updateImageData(entry, state)
+    } else {
+      updateImageData(nested, state)
+    }
+  }
+}
+
+function imageDataFromEvent(eventName, eventData, state) {
+  if (
+    eventName.startsWith('response.image_generation_call.') ||
+    eventName === 'response.output_item.done' ||
+    eventName === 'response.completed'
+  ) {
+    updateImageData(eventData, state)
+  }
+  if (eventName === 'response.failed' || eventName === 'error') {
+    const message =
+      eventData?.error?.message ?? eventData?.response?.error?.message ?? eventData?.message
+    throw new Error(
+      typeof message === 'string' && message.trim()
+        ? `Zentrola image generation failed: ${message.trim()}`
+        : 'Zentrola image generation failed.',
+    )
+  }
+  if (eventName === 'response.completed') {
+    state.responseCompleted = true
+    return true
+  }
+  return false
+}
+
+function processSseBlock(block, state) {
+  let eventName = ''
+  const dataLines = []
+  for (const line of block.split(/\r?\n/)) {
+    if (!line || line.startsWith(':')) continue
+    const separator = line.indexOf(':')
+    const field = separator < 0 ? line : line.slice(0, separator)
+    let value = separator < 0 ? '' : line.slice(separator + 1)
+    if (value.startsWith(' ')) value = value.slice(1)
+    if (field === 'event') eventName = value
+    if (field === 'data') dataLines.push(value)
+  }
+  if (dataLines.length === 0) return false
+  const dataText = dataLines.join('\n')
+  if (dataText === '[DONE]') {
+    state.responseCompleted = true
+    return true
+  }
+  let eventData
+  try {
+    eventData = JSON.parse(dataText)
+  } catch {
+    throw new Error('Zentrola returned an unreadable SSE event.')
+  }
+  return imageDataFromEvent(eventName || eventData?.type || '', eventData, state)
+}
+
+async function readImageSse(response) {
+  if (!response.body) throw new Error('Zentrola returned an empty SSE response.')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const state = { imageBase64: '', responseCompleted: false }
+  let buffer = ''
+  let completed = false
+
+  try {
+    while (!completed) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      for (;;) {
+        const match = /\r?\n\r?\n/.exec(buffer)
+        if (!match) break
+        const block = buffer.slice(0, match.index)
+        buffer = buffer.slice(match.index + match[0].length)
+        if (block && processSseBlock(block, state)) {
+          completed = true
+          break
+        }
+      }
+    }
+    buffer += decoder.decode()
+    if (!completed && buffer.trim()) processSseBlock(buffer, state)
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+
+  if (!state.responseCompleted) {
+    throw new Error('The Zentrola SSE stream ended before response.completed.')
+  }
+  if (!state.imageBase64) {
+    throw new Error('Zentrola completed the response without returning image data.')
+  }
+  return state.imageBase64
+}
+
+function decodePng(imageBase64) {
+  const withoutDataUrl = imageBase64.replace(/^data:image\/png;base64,/i, '')
+  const normalized = withoutDataUrl.replace(/\s/g, '')
+  if (
+    !normalized ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) ||
+    normalized.length % 4 === 1
+  ) {
+    throw new Error('Zentrola returned invalid base64 image data.')
+  }
+  const image = Buffer.from(normalized, 'base64')
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  if (image.length <= pngSignature.length || !image.subarray(0, 8).equals(pngSignature)) {
+    throw new Error('Zentrola returned image data that is not a PNG.')
+  }
+  return image
+}
+
+function redactSecret(value, secret) {
+  if (typeof value !== 'string' || typeof secret !== 'string' || !secret) return value
+  return value.split(secret).join('[redacted]')
+}
+
 async function getUsage(argumentsValue) {
   const range = normalizeUsageRange(argumentsValue)
   const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
@@ -512,9 +741,75 @@ async function getProvider(argumentsValue) {
   }
 }
 
+async function generateImage(argumentsValue) {
+  const { prompt, model } = normalizeImageArguments(argumentsValue)
+  const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
+  const endpoint = responsesEndpoint(baseURL, suffix)
+  let response
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        input: prompt,
+        tools: [{ type: 'image_generation' }],
+        store: false,
+        stream: true,
+      }),
+      signal: AbortSignal.timeout(5 * 60_000),
+    })
+  } catch (error) {
+    if (error?.name === 'TimeoutError') {
+      throw new Error('The Zentrola image generation request timed out.')
+    }
+    throw new Error('Unable to connect to the Zentrola image generation service.')
+  }
+
+  if (!response.ok) {
+    const responseText = (await response.text().catch(() => '')).slice(0, 64 * 1024)
+    let detail = ''
+    try {
+      const body = JSON.parse(responseText)
+      if (typeof body?.code === 'string') detail = `, error code ${body.code}`
+      else if (typeof body?.error?.message === 'string') detail = `: ${body.error.message}`
+    } catch {
+      if (responseText.trim()) detail = `: ${responseText.trim()}`
+    }
+    detail = redactSecret(detail, apiKey)
+    throw new Error(`The Zentrola image generation request failed (HTTP ${response.status}${detail}).`)
+  }
+
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!contentType.toLowerCase().includes('text/event-stream')) {
+    throw new Error('Zentrola returned a non-SSE image generation response.')
+  }
+
+  let imageBase64
+  try {
+    imageBase64 = await readImageSse(response)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Zentrola image generation failed.'
+    throw new Error(redactSecret(message, apiKey))
+  }
+  const image = decodePng(imageBase64)
+  return {
+    content: [
+      { type: 'text', text: `Generated a PNG image with ${model}.` },
+      { type: 'image', data: image.toString('base64'), mimeType: 'image/png' },
+    ],
+    structuredContent: { model, mimeType: 'image/png', bytes: image.length },
+  }
+}
+
 const toolHandlers = new Map([
   [usageTool.name, getUsage],
   [providerTool.name, getProvider],
+  [imageGenerationTool.name, generateImage],
 ])
 
 async function handle(request) {
@@ -529,7 +824,7 @@ async function handle(request) {
           capabilities: { tools: { listChanged: false } },
           serverInfo,
           instructions:
-            'Use get_usage for token consumption and get_provider with a model identifier for the current service provider name. Both tools are read-only and reuse the active client configuration.',
+            'Use get_usage for token consumption, get_provider with a model identifier for the current service provider name, and generate_image to create a PNG through Zentrola. All tools reuse the active client configuration.',
         },
       })
       return

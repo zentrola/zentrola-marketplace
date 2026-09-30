@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zentrola Image Generator"
+  short_description: "Generate PNG images directly through Zentrola"
+  default_prompt: "Use $zentrola:imagegen to generate a PNG image from my description."

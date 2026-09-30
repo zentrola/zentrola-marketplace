@@ -2,18 +2,20 @@
 
 [English](./README.md) | 简体中文
 
-Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可查询 Token 使用量、当前 Zentrola 服务商，并提供第三方 Skill 推荐入口。
+Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可直接通过 Zentrola 生成图片、查询 Token 使用量和当前服务商，并提供第三方 Skill 推荐入口。
 
 ## 客户端入口
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
-| Claude Code | `/usage` 查询用量；`/provider gpt-5.6-sol` 查询服务商 |
-| Codex | `$zentrola:usage` 或 `$zentrola:provider gpt-5.6-sol` |
+| Claude Code | `/imagegen <描述>` 生成图片；`/usage` 查询用量；`/provider gpt-5.6-sol` 查询服务商 |
+| Codex | `$zentrola:imagegen <描述>`、`$zentrola:usage` 或 `$zentrola:provider gpt-5.6-sol` |
 
-Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法 `$zentrola:usage` 和 `$zentrola:provider`。Claude Code 使用 `/usage` 和 `/provider` 包装层，两端使用插件中相同的 Skill。
+Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法，如 `$zentrola:imagegen`。Claude Code 使用 `/imagegen` 等包装层，两端使用插件中相同的 Skill。
 
 默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。服务商查询调用 `/api/v1/me/provider?model=<model>`，并返回服务端提供的 `data.name`。
+
+图片生成工具直接向 Zentrola `/v1/responses` 发起请求，不访问 ChatGPT Codex 上游。请求固定使用 `store: false`、`stream: true` 和 `image_generation` tool；默认模型为 `gpt-5.6-sol`，也可显式传入其他模型。MCP 增量读取 SSE，从 `response.image_generation_call.completed` 的 `result` 或最新的 `partial_image_b64` 获取图片，验证 PNG 后以 MCP 原生 `image` 内容返回。解析器不使用固定 64 KiB 行缓冲，可处理数 MiB 的图片事件。
 
 ## 目录结构
 
@@ -28,10 +30,14 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
     ├── .mcp.json                         # Claude MCP 启动配置（--client=claude）
     ├── .codex-plugin/plugin.json
     ├── .claude-plugin/plugin.json
+    ├── commands/imagegen.md              # Claude /imagegen
     ├── commands/usage.md                 # Claude /usage
     ├── commands/provider.md              # Claude /provider
     ├── scripts/zentrola-mcp.mjs          # 统一的 Zentrola MCP server
     ├── skills
+    │   ├── imagegen                      # Zentrola 图片生成流程
+    │   │   ├── SKILL.md
+    │   │   └── agents/openai.yaml
     │   ├── usage                         # Token 用量查询流程
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml
@@ -120,7 +126,7 @@ Codex 与 Claude Code 使用各自独立的 MCP 清单，由清单向共享服�
 - Claude Code：读取当前进程环境或 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL`，以及 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`。
 - Codex 环境变量兜底：`OPENAI_BASE_URL` 与 `OPENAI_API_KEY`。
 
-用户只需像平常一样将 Codex 或 Claude Code 配置为使用 Zentrola，不需要为 `zentrola:usage` 再配置地址或 Access Key。Codex 调用不会读取 Claude Code 配置，Claude Code 调用也不会读取 Codex 配置。更新文件凭据后，下一次查询会直接使用新值；更新仅存在于进程环境中的变量后，仍需重启对应客户端。
+用户只需像平常一样将 Codex 或 Claude Code 配置为使用 Zentrola，不需要为 `zentrola:imagegen` 或 `zentrola:usage` 再配置地址或 Access Key。Codex 调用不会读取 Claude Code 配置，Claude Code 调用也不会读取 Codex 配置。更新文件凭据后，下一次调用会直接使用新值；更新仅存在于进程环境中的变量后，仍需重启对应客户端。
 
 本地 MCP 通过系统 `PATH` 中的 `node` 启动，需要 Node.js 18 或更高版本。
 

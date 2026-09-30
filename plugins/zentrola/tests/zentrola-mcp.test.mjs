@@ -19,6 +19,8 @@ const emptyClientEnvironment = {
   ANTHROPIC_BASE_URL: '',
   ANTHROPIC_AUTH_TOKEN: '',
   ANTHROPIC_API_KEY: '',
+  ZENTROLA_BASE_URL: '',
+  ZENTROLA_VIRTUAL_KEY: '',
 }
 
 function listen(server) {
@@ -115,7 +117,17 @@ async function callProvider(rpc, argumentsValue = { model: 'gpt-5.6-sol' }) {
   return rpc(4, 'tools/call', { name: 'get_provider', arguments: argumentsValue })
 }
 
-async function testEnvironment(t, client, clientEnvironment) {
+async function callImage(rpc, argumentsValue = { prompt: 'Draw an otter.' }) {
+  return rpc(5, 'tools/call', { name: 'generate_image', arguments: argumentsValue })
+}
+
+async function readRequestBody(request) {
+  const chunks = []
+  for await (const chunk of request) chunks.push(chunk)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-test-key') {
   const requests = []
   const api = await startApi(t, (request, response) => {
     requests.push({
@@ -142,9 +154,14 @@ async function testEnvironment(t, client, clientEnvironment) {
   assert.equal(initialized.result.serverInfo.name, 'zentrola')
   assert.match(initialized.result.instructions, /get_usage/)
   assert.match(initialized.result.instructions, /get_provider/)
+  assert.match(initialized.result.instructions, /generate_image/)
 
   const listed = await rpc(2, 'tools/list')
-  assert.deepEqual(listed.result.tools.map(({ name }) => name), ['get_usage', 'get_provider'])
+  assert.deepEqual(listed.result.tools.map(({ name }) => name), [
+    'get_usage',
+    'get_provider',
+    'generate_image',
+  ])
   assert.deepEqual(listed.result.tools[0].inputSchema, {
     type: 'object',
     properties: {
@@ -196,6 +213,24 @@ async function testEnvironment(t, client, clientEnvironment) {
     required: ['name'],
     additionalProperties: false,
   })
+  assert.deepEqual(listed.result.tools[2].inputSchema, {
+    type: 'object',
+    properties: {
+      prompt: {
+        type: 'string',
+        minLength: 1,
+        description: 'A complete natural-language description of the image to generate.',
+      },
+      model: {
+        type: 'string',
+        minLength: 1,
+        default: 'gpt-5.6-sol',
+        description: 'Zentrola model identifier. Defaults to gpt-5.6-sol.',
+      },
+    },
+    required: ['prompt'],
+    additionalProperties: false,
+  })
 
   const called = await callUsage(rpc)
   assert.deepEqual(called.result.structuredContent, {
@@ -216,12 +251,12 @@ async function testEnvironment(t, client, clientEnvironment) {
     {
       method: 'GET',
       url: '/api/v1/me/usage',
-      authorization: 'Bearer vk-test-key',
+      authorization: `Bearer ${expectedKey}`,
     },
     {
       method: 'GET',
       url: '/api/v1/me/provider?model=gpt-5.6-sol',
-      authorization: 'Bearer vk-test-key',
+      authorization: `Bearer ${expectedKey}`,
     },
   ])
 }
@@ -238,6 +273,208 @@ test('Zentrola tools reuse the existing Anthropic-compatible environment', async
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/anthropic`,
     ANTHROPIC_API_KEY: 'vk-test-key',
   }))
+})
+
+test('Zentrola tools support the dedicated virtual key environment', async (t) => {
+  await testEnvironment(t, 'codex', (port) => ({
+    ZENTROLA_BASE_URL: `http://127.0.0.1:${port}/v1`,
+    ZENTROLA_VIRTUAL_KEY: 'vk-dedicated-key',
+  }), 'vk-dedicated-key')
+})
+
+test('generate_image streams a multi-megabyte SSE image from Zentrola', async (t) => {
+  const png = Buffer.alloc(3 * 1024 * 1024 + 8, 0x5a)
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png)
+  const imageBase64 = png.toString('base64')
+  const requests = []
+  const api = await startApi(t, (request, response) => {
+    void readRequestBody(request).then((body) => {
+      requests.push({
+        method: request.method,
+        url: request.url,
+        authorization: request.headers.authorization,
+        accept: request.headers.accept,
+        contentType: request.headers['content-type'],
+        body: JSON.parse(body),
+      })
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      response.write(
+        `event: response.image_generation_call.partial_image\ndata: ${JSON.stringify({ partial_image_b64: imageBase64 })}\n\n`,
+      )
+      response.write(
+        `event: response.image_generation_call.completed\ndata: ${JSON.stringify({ type: 'response.image_generation_call.completed' })}\n\n`,
+      )
+      response.end('event: response.completed\ndata: {"type":"response.completed"}\n\n')
+    })
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-image-key',
+  })
+  await initialize(rpc)
+
+  const called = await callImage(rpc, {
+    prompt: '生成一张戴宇航员头盔的水獭插画，透明背景，1024×1024',
+  })
+
+  assert.equal(called.result.isError, undefined)
+  assert.deepEqual(called.result.structuredContent, {
+    model: 'gpt-5.6-sol',
+    mimeType: 'image/png',
+    bytes: png.length,
+  })
+  assert.match(called.result.content[0].text, /gpt-5\.6-sol/)
+  assert.deepEqual(called.result.content[1], {
+    type: 'image',
+    data: imageBase64,
+    mimeType: 'image/png',
+  })
+  assert.deepEqual(requests, [
+    {
+      method: 'POST',
+      url: '/v1/responses',
+      authorization: 'Bearer vk-image-key',
+      accept: 'text/event-stream',
+      contentType: 'application/json',
+      body: {
+        model: 'gpt-5.6-sol',
+        input: '生成一张戴宇航员头盔的水獭插画，透明背景，1024×1024',
+        tools: [{ type: 'image_generation' }],
+        store: false,
+        stream: true,
+      },
+    },
+  ])
+})
+
+test('generate_image uses a completed result and normalizes the Claude base path', async (t) => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', 'base64')
+  let requestedURL = ''
+  const api = await startApi(t, (request, response) => {
+    requestedURL = request.url ?? ''
+    request.resume()
+    request.on('end', () => {
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      response.end(
+        'event: response.image_generation_call.completed\ndata: {}\n\n' +
+          `event: response.completed\ndata: ${JSON.stringify({ response: { output: [{ type: 'image_generation_call', result: png.toString('base64') }] } })}\n\n`,
+      )
+    })
+  })
+  const { rpc } = startMcp(t, 'claude', {
+    ANTHROPIC_BASE_URL: `http://127.0.0.1:${api.address().port}/anthropic`,
+    ANTHROPIC_API_KEY: 'vk-claude-image-key',
+  })
+  await initialize(rpc)
+
+  const called = await callImage(rpc, { prompt: 'Draw a moon.', model: 'custom-image-model' })
+
+  assert.equal(called.result.isError, undefined)
+  assert.equal(called.result.structuredContent.model, 'custom-image-model')
+  assert.equal(requestedURL, '/v1/responses')
+})
+
+test('generate_image validates arguments before contacting Zentrola', async (t) => {
+  let requestCount = 0
+  const api = await startApi(t, (_request, response) => {
+    requestCount += 1
+    respondJson(response, {}, 500)
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-image-key',
+  })
+  await initialize(rpc)
+
+  const cases = [
+    [{}, /prompt must be a non-empty string/],
+    [{ prompt: '  ' }, /prompt must be a non-empty string/],
+    [{ prompt: 'image', model: '' }, /model must be a non-empty string/],
+    [{ prompt: 'image', unexpected: true }, /accepts only prompt and model/],
+  ]
+  for (const [argumentsValue, expectedError] of cases) {
+    const called = await callImage(rpc, argumentsValue)
+    assert.equal(called.result.isError, true)
+    assert.match(called.result.content[0].text, expectedError)
+  }
+  assert.equal(requestCount, 0)
+})
+
+test('generate_image reports Zentrola HTTP and SSE errors without exposing the key', async (t) => {
+  const httpErrorApi = await startApi(t, (_request, response) => {
+    respondJson(response, { code: 'IMAGE_GENERATION_DENIED' }, 403)
+  })
+  const { rpc: httpErrorRpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${httpErrorApi.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-secret-image-key',
+  })
+  await initialize(httpErrorRpc)
+  const httpError = await callImage(httpErrorRpc)
+  assert.equal(httpError.result.isError, true)
+  assert.match(httpError.result.content[0].text, /HTTP 403, error code IMAGE_GENERATION_DENIED/)
+  assert.doesNotMatch(httpError.result.content[0].text, /vk-secret-image-key/)
+
+  const sseErrorApi = await startApi(t, (request, response) => {
+    request.resume()
+    request.on('end', () => {
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      response.end(
+        'event: response.failed\ndata: {"error":{"message":"generation unavailable for vk-image-key"}}\n\n',
+      )
+    })
+  })
+  const { rpc: sseErrorRpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${sseErrorApi.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-image-key',
+  })
+  await initialize(sseErrorRpc)
+  const sseError = await callImage(sseErrorRpc)
+  assert.equal(sseError.result.isError, true)
+  assert.match(sseError.result.content[0].text, /generation unavailable/)
+  assert.match(sseError.result.content[0].text, /\[redacted\]/)
+  assert.doesNotMatch(sseError.result.content[0].text, /vk-image-key/)
+})
+
+test('generate_image rejects non-PNG image data', async (t) => {
+  const api = await startApi(t, (request, response) => {
+    request.resume()
+    request.on('end', () => {
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      response.end(
+        `event: response.image_generation_call.completed\ndata: ${JSON.stringify({ result: Buffer.from('not a png').toString('base64') })}\n\n` +
+          'event: response.completed\ndata: {}\n\n',
+      )
+    })
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-image-key',
+  })
+  await initialize(rpc)
+  const called = await callImage(rpc)
+  assert.equal(called.result.isError, true)
+  assert.match(called.result.content[0].text, /not a PNG/)
+})
+
+test('generate_image rejects an incomplete SSE stream', async (t) => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', 'base64')
+  const api = await startApi(t, (request, response) => {
+    request.resume()
+    request.on('end', () => {
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      response.end(
+        `event: response.image_generation_call.partial_image\ndata: ${JSON.stringify({ partial_image_b64: png.toString('base64') })}\n\n`,
+      )
+    })
+  })
+  const { rpc } = startMcp(t, 'codex', {
+    OPENAI_BASE_URL: `http://127.0.0.1:${api.address().port}/v1`,
+    OPENAI_API_KEY: 'vk-image-key',
+  })
+  await initialize(rpc)
+  const called = await callImage(rpc)
+  assert.equal(called.result.isError, true)
+  assert.match(called.result.content[0].text, /ended before response\.completed/)
 })
 
 test('get_usage passes an explicit RFC3339 range to Zentrola', async (t) => {
