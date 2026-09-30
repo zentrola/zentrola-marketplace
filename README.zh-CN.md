@@ -122,7 +122,7 @@ codex plugin add zentrola@zentrola-marketplace
 
 Codex 与 Claude Code 使用各自独立的 MCP 清单，由清单向共享服务传入明确的客户端参数；服务随后只重新读取对应客户端的 Zentrola 网关地址和 Access Key。服务不会根据环境标记猜测客户端，不会回退到另一客户端的配置，也不会在 Plugin 中缓存凭据：
 
-- Codex：读取 `~/.codex/config.toml` 中当前 Model Provider 的 `base_url`，并从该 Provider 指定的环境变量或文件凭据存储 `~/.codex/auth.json` 获取 Access Key。
+- Codex：读取 `~/.codex/config.toml` 中当前 Model Provider 的 `base_url`，并从该 Provider 指定的环境变量、仅用于兼容的 `experimental_bearer_token` 字段或文件凭据存储 `~/.codex/auth.json` 获取 Access Key。应优先使用环境变量，而不是内联 Bearer Token。
 - Claude Code：读取当前进程环境或 `~/.claude/settings.json` 中的 `ANTHROPIC_BASE_URL`，以及 `ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`。
 - Codex 环境变量兜底：`OPENAI_BASE_URL` 与 `OPENAI_API_KEY`。
 
@@ -132,7 +132,7 @@ Codex 与 Claude Code 使用各自独立的 MCP 清单，由清单向共享服�
 
 ## 安全说明
 
-MCP 只从当前客户端配置中读取网关地址和 Access Key，并只将 Access Key 作为 Bearer 凭据发送到该地址。它不会把 Access Key 返回给模型、写入日志或持久化到 Plugin 中。由于 `auth.json` 包含明文凭据，应继续按照密码文件保护它。
+MCP 只从当前客户端配置中读取网关地址和 Access Key，并只将 Access Key 作为 Bearer 凭据发送到该地址。它不会把 Access Key 返回给模型、写入日志或持久化到 Plugin 中。由于 `auth.json` 和内联的 `experimental_bearer_token` 都包含明文凭据，应继续按照密码文件保护它们。
 
 部署条件允许时，建议优先使用 HTTPS。如果基于 IP 或内部网络的部署必须使用 HTTP，请确保通信只经过可信且受保护的网络。不要向仓库提交真实的服务凭据。
 

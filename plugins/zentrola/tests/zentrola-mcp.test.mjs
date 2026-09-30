@@ -586,6 +586,28 @@ test('get_usage dynamically rereads Codex config.toml and auth.json for every ca
   ])
 })
 
+test('get_usage reuses the active Codex provider experimental bearer token', async (t) => {
+  const codexHome = await mkdtemp(join(tmpdir(), 'zusage-codex-bearer-'))
+  t.after(() => rm(codexHome, { recursive: true, force: true }))
+
+  let authorization = ''
+  const api = await startApi(t, (request, response) => {
+    authorization = request.headers.authorization ?? ''
+    respondJson(response, successBody())
+  })
+  await writeFile(
+    join(codexHome, 'config.toml'),
+    `model_provider = "custom"\n\n[model_providers.custom]\nbase_url = "http://127.0.0.1:${api.address().port}/v1"\nexperimental_bearer_token = "vk-inline-key"\n`,
+  )
+
+  const { rpc } = startMcp(t, 'codex', { CODEX_HOME: codexHome })
+  await initialize(rpc)
+  const called = await callUsage(rpc)
+
+  assert.equal(called.result.isError, undefined)
+  assert.equal(authorization, 'Bearer vk-inline-key')
+})
+
 test('get_provider passes model and returns data.name from /api/v1/me/provider', async (t) => {
   const requests = []
   const api = await startApi(t, (request, response) => {

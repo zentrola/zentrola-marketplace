@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola', version: '0.2.0' }
+const serverInfo = { name: 'zentrola', version: '0.2.1' }
 const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
@@ -230,6 +230,16 @@ async function pairFromCodex() {
       process.env[provider.env_key],
       '/v1',
       'Codex provider environment',
+    )
+    if (pair) return pair
+  }
+
+  if (typeof provider.experimental_bearer_token === 'string') {
+    const pair = completePair(
+      provider.base_url,
+      provider.experimental_bearer_token,
+      '/v1',
+      'Codex config.toml experimental bearer token',
     )
     if (pair) return pair
   }

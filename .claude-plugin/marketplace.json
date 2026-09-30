@@ -11,7 +11,7 @@
       "name": "zentrola",
       "source": "./plugins/zentrola",
       "description": "Generate images and access Zentrola account information, including token usage and the current service provider.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "Zentrola"
       },
