@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola', version: '0.2.2' }
+const serverInfo = { name: 'zentrola', version: '0.3.0' }
 const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
@@ -69,6 +69,40 @@ const upstreamQuotaTool = {
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+}
+
+const createMemberTool = {
+  name: 'create_member',
+  title: 'Create an ordinary Zentrola member and active Key',
+  description: 'Create an ordinary member with an active first Virtual Key. Requires per-Key member management authorization. The new Key has no management or upstream quota permission and is returned only once.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', minLength: 1, maxLength: 128 },
+      remark: { type: 'string', maxLength: 2000 },
+      groupIds: { type: 'array', items: { type: 'string', pattern: '^[1-9][0-9]*$' }, uniqueItems: true },
+      keyName: { type: 'string', minLength: 1, maxLength: 128 },
+    },
+    required: ['name', 'keyName'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+}
+
+const issueMemberKeyTool = {
+  name: 'issue_member_key',
+  title: 'Issue an ordinary Zentrola member Key',
+  description: 'Issue an active ordinary Virtual Key for an existing member and activate that member. Requires per-Key member management authorization. The new Key is returned only once.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      memberId: { type: 'string', pattern: '^[1-9][0-9]*$' },
+      name: { type: 'string', minLength: 1, maxLength: 128 },
+    },
+    required: ['memberId', 'name'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 }
 
 const providerTool = {
@@ -135,7 +169,7 @@ const imageGenerationTool = {
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
 }
 
-const tools = [usageTool, quotaTool, upstreamQuotaTool, providerTool, imageGenerationTool]
+const tools = [usageTool, quotaTool, upstreamQuotaTool, createMemberTool, issueMemberKeyTool, providerTool, imageGenerationTool]
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -799,6 +833,73 @@ async function getUpstreamQuota(argumentsValue) {
   return { content: [{ type: 'text', text }], structuredContent: data }
 }
 
+function managementArguments(value, allowed, required) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).some((key) => !allowed.includes(key))) {
+    throw new Error('Invalid member management arguments.')
+  }
+  for (const key of required) {
+    if (typeof value[key] !== 'string' || !value[key].trim()) throw new Error(`${key} is required.`)
+  }
+  if (value.name !== undefined && (value.name.length > 128 || value.name.includes('\0'))) throw new Error('Invalid member name.')
+  if (value.keyName !== undefined && (typeof value.keyName !== 'string' || value.keyName.length > 128 || value.keyName.includes('\0'))) throw new Error('Invalid Key name.')
+  if (value.remark !== undefined && (typeof value.remark !== 'string' || value.remark.length > 2000 || value.remark.includes('\0'))) throw new Error('Invalid remark.')
+  if (value.groupIds !== undefined && (!Array.isArray(value.groupIds) ||
+      value.groupIds.some((id) => typeof id !== 'string' || !/^[1-9][0-9]*$/.test(id)) ||
+      new Set(value.groupIds).size !== value.groupIds.length)) throw new Error('Invalid groupIds.')
+  if (value.memberId !== undefined && (typeof value.memberId !== 'string' || !/^[1-9][0-9]*$/.test(value.memberId))) throw new Error('Invalid memberId.')
+  return value
+}
+
+async function mutateMember(resource, payload) {
+  const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
+  const endpoint = meEndpoint(baseURL, suffix, resource)
+  let response
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch (error) {
+    if (error?.name === 'TimeoutError') throw new Error('The connection to Zentrola timed out. Check whether the operation completed before retrying.')
+    throw new Error('Unable to connect to the Zentrola service. Check whether the operation completed before retrying.')
+  }
+  let body
+  try { body = await response.json() }
+  catch { throw new Error(`Zentrola returned an unreadable response (HTTP ${response.status}). Check whether the operation completed before retrying.`) }
+  if (!response.ok) {
+    const code = typeof body?.code === 'string' ? `, error code ${body.code}` : ''
+    throw new Error(`The Zentrola management request failed (HTTP ${response.status}${code}).`)
+  }
+  if (!body?.data || typeof body.data !== 'object') throw new Error('Zentrola returned invalid member management data.')
+  return body.data
+}
+
+async function createMember(argumentsValue) {
+  const args = managementArguments(argumentsValue, ['name', 'remark', 'groupIds', 'keyName'], ['name', 'keyName'])
+  const data = await mutateMember('manage/members', {
+    name: args.name.trim(), keyName: args.keyName.trim(),
+    ...(args.remark === undefined ? {} : { remark: args.remark.trim() }),
+    ...(args.groupIds === undefined ? {} : { groupIds: args.groupIds }),
+  })
+  if (typeof data.id !== 'string' || data.status !== 'ACTIVE' ||
+      typeof data.key?.key !== 'string' || data.key.canManageMembers !== false) {
+    throw new Error('Zentrola returned invalid member management data.')
+  }
+  return { content: [{ type: 'text', text: `Created active ordinary member ${data.name} (ID ${data.id}). One-time Virtual Key: ${data.key.key}` }], structuredContent: data }
+}
+
+async function issueMemberKey(argumentsValue) {
+  const args = managementArguments(argumentsValue, ['memberId', 'name'], ['memberId', 'name'])
+  const data = await mutateMember(`manage/members/${args.memberId}/keys`, { name: args.name.trim() })
+  if (typeof data.id !== 'string' || typeof data.key !== 'string' || data.canManageMembers !== false) {
+    throw new Error('Zentrola returned invalid member management data.')
+  }
+  return { content: [{ type: 'text', text: `Issued an active ordinary Virtual Key for member ${args.memberId}. One-time Virtual Key: ${data.key}` }], structuredContent: data }
+}
+
 async function getProvider(argumentsValue) {
   if (
     argumentsValue === null ||
@@ -920,6 +1021,8 @@ const toolHandlers = new Map([
   [usageTool.name, getUsage],
   [quotaTool.name, getQuota],
   [upstreamQuotaTool.name, getUpstreamQuota],
+  [createMemberTool.name, createMember],
+  [issueMemberKeyTool.name, issueMemberKey],
   [providerTool.name, getProvider],
   [imageGenerationTool.name, generateImage],
 ])
@@ -936,7 +1039,7 @@ async function handle(request) {
           capabilities: { tools: { listChanged: false } },
           serverInfo,
           instructions:
-            'Use get_usage for token consumption, get_quota for current-month personal and model quota, get_upstream_quota for the authorized current subscription snapshot, get_provider for a model provider, and generate_image to create a PNG. All tools reuse the active client configuration.',
+            'Use get_usage for token consumption, get_quota for current-month personal and model quota, get_upstream_quota for the authorized current subscription snapshot, create_member and issue_member_key for explicitly requested member management, get_provider for a model provider, and generate_image to create a PNG. Management tools require individual Key authorization and return a Key only once. All tools reuse the active client configuration.',
         },
       })
       return

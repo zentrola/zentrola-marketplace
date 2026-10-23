@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zentrola Member Management"
+  short_description: "Create ordinary members and issue Virtual Keys"
+  default_prompt: "Use $zentrola:member-management to create an ordinary member and their first Key."
+
+policy:
+  allow_implicit_invocation: false

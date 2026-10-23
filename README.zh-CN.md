@@ -8,8 +8,8 @@ Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可直�
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
-| Claude Code | `/imagegen <描述>` 生成图片；`/usage` 查询用量；`/quota` 查询个人额度；`/upstream-quota gpt-5.6-sol` 查询当前订阅额度；`/provider gpt-5.6-sol` 查询服务商 |
-| Codex | `$zentrola:imagegen <描述>`、`$zentrola:usage`、`$zentrola:quota`、`$zentrola:upstream-quota gpt-5.6-sol` 或 `$zentrola:provider gpt-5.6-sol` |
+| Claude Code | `/imagegen <描述>` 生成图片；`/usage` 查询用量；`/quota` 查询个人额度；`/upstream-quota gpt-5.6-sol` 查询当前订阅额度；`/member-management <请求>` 管理普通成员与 Key；`/provider gpt-5.6-sol` 查询服务商 |
+| Codex | `$zentrola:imagegen <描述>`、`$zentrola:usage`、`$zentrola:quota`、`$zentrola:upstream-quota gpt-5.6-sol`、`$zentrola:member-management <请求>` 或 `$zentrola:provider gpt-5.6-sol` |
 
 Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法，如 `$zentrola:imagegen`。Claude Code 使用 `/imagegen` 等包装层，两端使用插件中相同的 Skill。
 
@@ -18,6 +18,8 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
 图片生成工具直接向 Zentrola `/v1/responses` 发起请求，不访问 ChatGPT Codex 上游。请求固定使用 `store: false`、`stream: true` 和 `image_generation` tool；默认模型为 `gpt-5.6-sol`，也可显式传入其他模型。MCP 增量读取 SSE，从 `response.image_generation_call.completed` 的 `result` 或最新的 `partial_image_b64` 获取图片，验证 PNG 后以 MCP 原生 `image` 内容返回。解析器不使用固定 64 KiB 行缓冲，可处理数 MiB 的图片事件。
 
 `get_quota` 返回当前 UTC 月所有模型的 Token 总用量与个人额度；指定模型时，再返回个人与适用用户组中最小的剩余额度。`get_upstream_quota` 需要按 Key 单独授权，只读取该 Key 指定模型最近一次成功请求所用订阅号的额度快照。无数据或快照过期时返回未知，不触发上游实时探测。
+
+`create_member` 一次创建普通成员和已启用的首把 Virtual Key；`issue_member_key` 为已有普通成员签发 Key 并启用该成员。两项操作都要求调用方 Key 单独获得成员管理授权，不能创建管理员，也不会把管理权限授予新 Key。完整新 Key 只返回一次。
 
 ## 目录结构
 
@@ -34,6 +36,9 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
     ├── .claude-plugin/plugin.json
     ├── commands/imagegen.md              # Claude /imagegen
     ├── commands/usage.md                 # Claude /usage
+    ├── commands/quota.md                 # Claude /quota
+    ├── commands/upstream-quota.md        # Claude /upstream-quota
+    ├── commands/member-management.md     # Claude /member-management
     ├── commands/provider.md              # Claude /provider
     ├── scripts/zentrola-mcp.mjs          # 统一的 Zentrola MCP server
     ├── skills
@@ -43,6 +48,9 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
     │   ├── usage                         # Token 用量查询流程
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml
+    │   ├── quota                         # 个人 Token 额度查询
+    │   ├── upstream-quota                # 授权订阅额度快照
+    │   ├── member-management             # 明确请求的普通成员写操作
     │   ├── provider                      # 服务商查询流程
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml

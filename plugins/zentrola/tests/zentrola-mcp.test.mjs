@@ -170,6 +170,43 @@ test('upstream quota text includes saved item values and rejects unauthorized ke
   assert.match(result.result.content[0].text, /HTTP 403/)
 })
 
+test('member management tools create only ordinary active members and Keys', async (t) => {
+  const requests = []
+  const api = await startApi(t, async (request, response) => {
+    let payload = ''
+    for await (const chunk of request) payload += chunk
+    requests.push({ method: request.method, url: request.url, authorization: request.headers.authorization, body: JSON.parse(payload) })
+    if (request.headers.authorization === 'Bearer vk-denied') {
+      respondJson(response, { code: 'FORBIDDEN' }, 403)
+    } else if (request.url === '/api/v1/me/manage/members') {
+      respondJson(response, { code: 'OK', data: { id: '123', name: 'Alice', status: 'ACTIVE', key: { id: '124', key: 'vk-new', canManageMembers: false } } }, 201)
+    } else if (request.url === '/api/v1/me/manage/members/123/keys') {
+      respondJson(response, { code: 'OK', data: { id: '125', key: 'vk-another', canManageMembers: false } }, 201)
+    } else { respondJson(response, { code: 'NOT_FOUND' }, 404) }
+  })
+  const { port } = api.address()
+  const environment = { ZENTROLA_BASE_URL: `http://127.0.0.1:${port}/v1`, ZENTROLA_VIRTUAL_KEY: 'vk-authorized' }
+  const { rpc } = startMcp(t, 'codex', environment)
+  await initialize(rpc)
+  const invalid = await rpc(9, 'tools/call', { name: 'create_member', arguments: { name: 'Alice', keyName: 'First', isAdmin: true } })
+  assert.equal(invalid.result.isError, true)
+  assert.equal(requests.length, 0)
+  const created = await rpc(10, 'tools/call', { name: 'create_member', arguments: { name: 'Alice', keyName: 'First', groupIds: ['7'] } })
+  assert.equal(created.result.structuredContent.status, 'ACTIVE')
+  assert.match(created.result.content[0].text, /vk-new/)
+  const issued = await rpc(11, 'tools/call', { name: 'issue_member_key', arguments: { memberId: '123', name: 'Second' } })
+  assert.match(issued.result.content[0].text, /vk-another/)
+  assert.deepEqual(requests.map((entry) => entry.url), ['/api/v1/me/manage/members', '/api/v1/me/manage/members/123/keys'])
+  assert.ok(requests.every((entry) => entry.method === 'POST' && entry.authorization === 'Bearer vk-authorized'))
+  assert.deepEqual(requests[0].body, { name: 'Alice', keyName: 'First', groupIds: ['7'] })
+
+  const denied = startMcp(t, 'codex', { ...environment, ZENTROLA_VIRTUAL_KEY: 'vk-denied' })
+  await initialize(denied.rpc)
+  const result = await denied.rpc(12, 'tools/call', { name: 'create_member', arguments: { name: 'Alice', keyName: 'First' } })
+  assert.equal(result.result.isError, true)
+  assert.match(result.result.content[0].text, /HTTP 403/)
+})
+
 async function callProvider(rpc, argumentsValue = { model: 'gpt-5.6-sol' }) {
   return rpc(4, 'tools/call', { name: 'get_provider', arguments: argumentsValue })
 }
@@ -218,6 +255,8 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     'get_usage',
     'get_quota',
     'get_upstream_quota',
+    'create_member',
+    'issue_member_key',
     'get_provider',
     'generate_image',
   ])
@@ -252,7 +291,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['tokens', 'from', 'to', 'timezone', 'fromLocal', 'toLocal'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[3].inputSchema, {
+  assert.deepEqual(listed.result.tools[5].inputSchema, {
     type: 'object',
     properties: {
       model: {
@@ -264,7 +303,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['model'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[3].outputSchema, {
+  assert.deepEqual(listed.result.tools[5].outputSchema, {
     type: 'object',
     properties: {
       name: { type: 'string' },
@@ -272,7 +311,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['name'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[4].inputSchema, {
+  assert.deepEqual(listed.result.tools[6].inputSchema, {
     type: 'object',
     properties: {
       prompt: {
