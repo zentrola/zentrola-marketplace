@@ -11,7 +11,7 @@
     "com.openai": {
       "interface": {
         "displayName": "Zentrola",
-        "shortDescription": "Generate images and view Zentrola account information.",
+        "shortDescription": "Generate images, view Zentrola account information, and manage ordinary members.",
         "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for Codex to generate PNG images, query token usage and quotas, identify the current service provider, and manage ordinary members when the Key has permission.",
         "developerName": "Zentrola",
         "category": "Productivity",

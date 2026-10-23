@@ -19,7 +19,7 @@
   },
   "interface": {
     "displayName": "Zentrola",
-    "shortDescription": "Generate images and view Zentrola account information.",
+    "shortDescription": "Generate images, view Zentrola account information, and manage ordinary members.",
     "longDescription": "Reuse the Zentrola endpoint and Access Key already configured for the current client to generate PNG images, query account information, and manage ordinary members when the Key has permission.",
     "developerName": "Zentrola",
     "category": "Productivity",
@@ -30,6 +30,7 @@
     "defaultPrompt": [
       "Use $zentrola:imagegen to generate a PNG image from my description.",
       "Use $zentrola:usage to query my current-month Zentrola token usage.",
+      "Use $zentrola:quota to query my current-month quota.",
       "Use $zentrola:member-management to create an ordinary member and their first Key.",
       "Use $zentrola:provider to show my current Zentrola service provider."
     ]

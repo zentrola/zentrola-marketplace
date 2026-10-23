@@ -12,4 +12,16 @@ These Zentrola MCP tools require that the active Access Key has been individuall
 - `issue_member_key` issues an ordinary Key for an existing member ID. It never changes member status: a disabled member returns `MEMBER_DISABLED`. Enable the member with `set_member_status` first only when the user asks for that.
 - `set_member_status` enables (`ACTIVE`) or disables (`DISABLED`) an ordinary member. Disabling immediately blocks all of that member's Keys without revoking them, and enabling restores them. Enabling requires at least one valid Key (`MEMBER_ACCESS_KEY_REQUIRED` otherwise).
 
-Never use these tools to create an administrator or to grant management or upstream-quota permission to a newly issued Key. A new Key is ordinary and its full value is returned only once. Give the full Key only to the requesting user, advise them to store it securely, and do not repeat it in subsequent messages. If a write request times out, check whether the operation completed before retrying; a retry can create another member or Key. Do not call a write tool based on an ambiguous request, and confirm the member before disabling it.
+## Member IDs
+
+There is no tool to look up members by name, and these tools can act on any ordinary member, so a wrong ID affects someone else.
+
+- Use a `memberId` only when the user stated that exact ID or `create_member` returned it in this conversation. Never infer an ID from a name, guess one, or reuse an unrelated number from the context.
+- If the user names a member without an ID, ask for the ID (an administrator can find it in the Zentrola console).
+- Before `issue_member_key` or `set_member_status`, restate the member ID and the action and get the user's confirmation, unless the user already gave that exact ID and action in the same request.
+
+## Safety
+
+Never use these tools to create an administrator or to grant management or upstream-quota permission to a newly issued Key. A new Key is ordinary and its full value is returned only once. Give the full Key only to the requesting user, advise them to store it securely, and do not repeat it in subsequent messages. If a result carries a warning about unexpected data, still deliver the Key and pass the warning on.
+
+Do not retry a write tool automatically. After a timeout, an unreadable response, or a message saying the operation was most likely completed, tell the user and ask them to verify in the Zentrola admin console; retrying can create another member or Key. Do not call a write tool based on an ambiguous request.

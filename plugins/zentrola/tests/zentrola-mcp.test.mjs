@@ -186,6 +186,12 @@ test('member management tools create only ordinary active members and Keys', asy
       respondJson(response, { code: 'OK', data: { id: '125', key: 'vk-another', canManageMembers: false } }, 201)
     } else if (request.url === '/api/v1/me/manage/members/123/status') {
       respondJson(response, { code: 'OK', data: { id: '123', status: JSON.parse(payload).status } })
+    } else if (request.url === '/api/v1/me/manage/members/789/keys') {
+      respondJson(response, { code: 'OK', data: { id: '126', key: 'vk-odd' } }, 201)
+    } else if (request.url === '/api/v1/me/manage/members/790/keys') {
+      respondJson(response, { code: 'OK', data: { id: '127' } }, 201)
+    } else if (request.url === '/api/v1/me/manage/members/124/status') {
+      respondJson(response, { code: 'OK', data: { id: '124', status: 'ACTIVE' } })
     } else if (request.url === '/api/v1/me/manage/members/456/keys') {
       respondJson(response, { code: 'MEMBER_DISABLED' }, 409)
     } else { respondJson(response, { code: 'NOT_FOUND' }, 404) }
@@ -198,6 +204,10 @@ test('member management tools create only ordinary active members and Keys', asy
     [9, { name: 'Alice', keyName: 'First', groupIds: ['7'], isAdmin: true }],
     [10, { name: 'Alice', keyName: 'First' }],
     [11, { name: 'Alice', keyName: 'First', groupIds: [] }],
+    [30, { name: '汉'.repeat(43), keyName: 'First', groupIds: ['7'] }],
+    [31, { name: 'Al\u0007ice', keyName: 'First', groupIds: ['7'] }],
+    [32, { name: 'Alice', keyName: 'First\uD800', groupIds: ['7'] }],
+    [33, { name: 'Alice', keyName: 'First', groupIds: ['7'], remark: 'x'.repeat(2001) }],
   ]) {
     const invalid = await rpc(id, 'tools/call', { name: 'create_member', arguments: args })
     assert.equal(invalid.result.isError, true)
@@ -243,6 +253,26 @@ test('member management tools create only ordinary active members and Keys', asy
   assert.ok(requests.every((entry) => entry.authorization === 'Bearer vk-authorized'))
   assert.deepEqual(requests[1].body, { name: 'Alice', keyName: 'First', groupIds: ['7'] })
   assert.deepEqual(requests[3].body, { status: 'DISABLED' })
+
+  const listed = await rpc(34, 'tools/list')
+  assert.deepEqual(toolNamed(listed, 'set_member_status').annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false })
+  assert.equal(toolNamed(listed, 'create_member').inputSchema.properties.groupIds.minItems, 1)
+
+  const odd = await rpc(35, 'tools/call', { name: 'issue_member_key', arguments: { memberId: '789', name: 'Odd' } })
+  assert.equal(odd.result.isError, undefined)
+  assert.match(odd.result.content[0].text, /One-time Virtual Key: vk-odd/)
+  assert.match(odd.result.content[0].text, /Warning: .*member management permission.*upstream quota permission/)
+  const keyless = await rpc(36, 'tools/call', { name: 'issue_member_key', arguments: { memberId: '790', name: 'Keyless' } })
+  assert.equal(keyless.result.isError, true)
+  assert.match(keyless.result.content[0].text, /most likely completed; do not retry/)
+  const mismatch = await rpc(37, 'tools/call', { name: 'set_member_status', arguments: { memberId: '124', status: 'DISABLED' } })
+  assert.equal(mismatch.result.isError, undefined)
+  assert.match(mismatch.result.content[0].text, /Warning: .*reported status is ACTIVE/)
+  assert.deepEqual(requests.slice(6).map((entry) => `${entry.method} ${entry.url}`), [
+    'POST /api/v1/me/manage/members/789/keys',
+    'POST /api/v1/me/manage/members/790/keys',
+    'PUT /api/v1/me/manage/members/124/status',
+  ])
 
   const denied = startMcp(t, 'codex', { ...environment, ZENTROLA_VIRTUAL_KEY: 'vk-denied' })
   await initialize(denied.rpc)

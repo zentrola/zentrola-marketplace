@@ -93,10 +93,10 @@ const createMemberTool = {
   inputSchema: {
     type: 'object',
     properties: {
-      name: { type: 'string', minLength: 1, maxLength: 128 },
-      remark: { type: 'string', maxLength: 2000 },
+      name: { type: 'string', minLength: 1, maxLength: 128, description: 'Member name; at most 128 UTF-8 bytes (about 42 CJK characters), no control characters.' },
+      remark: { type: 'string', maxLength: 2000, description: 'At most 2000 UTF-8 bytes, no control characters.' },
       groupIds: { type: 'array', items: { type: 'string', pattern: '^[1-9][0-9]*$' }, minItems: 1, uniqueItems: true },
-      keyName: { type: 'string', minLength: 1, maxLength: 128 },
+      keyName: { type: 'string', minLength: 1, maxLength: 128, description: 'At most 128 UTF-8 bytes, no control characters.' },
     },
     required: ['name', 'groupIds', 'keyName'],
     additionalProperties: false,
@@ -112,7 +112,7 @@ const issueMemberKeyTool = {
     type: 'object',
     properties: {
       memberId: { type: 'string', pattern: '^[1-9][0-9]*$' },
-      name: { type: 'string', minLength: 1, maxLength: 128 },
+      name: { type: 'string', minLength: 1, maxLength: 128, description: 'Key name; at most 128 UTF-8 bytes, no control characters.' },
     },
     required: ['memberId', 'name'],
     additionalProperties: false,
@@ -133,7 +133,7 @@ const setMemberStatusTool = {
     required: ['memberId', 'status'],
     additionalProperties: false,
   },
-  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
 }
 
 const providerTool = {
@@ -864,6 +864,14 @@ async function getUpstreamQuota(argumentsValue) {
   return { content: [{ type: 'text', text }], structuredContent: data }
 }
 
+function validManagementText(value, maxBytes) {
+  if (typeof value !== 'string') return false
+  // Match the server: UTF-8 byte limits, valid UTF-8 (no lone surrogates), and no control characters.
+  const trimmed = value.trim()
+  const encoded = Buffer.from(trimmed, 'utf8')
+  return encoded.length <= maxBytes && encoded.toString('utf8') === trimmed && !/\p{Cc}/u.test(trimmed)
+}
+
 function managementArguments(value, allowed, required) {
   if (value === null || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).some((key) => !allowed.includes(key))) {
@@ -872,9 +880,9 @@ function managementArguments(value, allowed, required) {
   for (const key of required) {
     if (typeof value[key] !== 'string' || !value[key].trim()) throw new Error(`${key} is required.`)
   }
-  if (value.name !== undefined && (value.name.length > 128 || value.name.includes('\0'))) throw new Error('Invalid member name.')
-  if (value.keyName !== undefined && (typeof value.keyName !== 'string' || value.keyName.length > 128 || value.keyName.includes('\0'))) throw new Error('Invalid Key name.')
-  if (value.remark !== undefined && (typeof value.remark !== 'string' || value.remark.length > 2000 || value.remark.includes('\0'))) throw new Error('Invalid remark.')
+  if (value.name !== undefined && !validManagementText(value.name, 128)) throw new Error('Invalid member name: use at most 128 UTF-8 bytes without control characters.')
+  if (value.keyName !== undefined && !validManagementText(value.keyName, 128)) throw new Error('Invalid Key name: use at most 128 UTF-8 bytes without control characters.')
+  if (value.remark !== undefined && !validManagementText(value.remark, 2000)) throw new Error('Invalid remark: use at most 2000 UTF-8 bytes without control characters.')
   if (value.groupIds !== undefined && (!Array.isArray(value.groupIds) ||
       value.groupIds.some((id) => typeof id !== 'string' || !/^[1-9][0-9]*$/.test(id)) ||
       new Set(value.groupIds).size !== value.groupIds.length)) throw new Error('Invalid groupIds.')
@@ -905,8 +913,23 @@ async function mutateMember(resource, payload, method = 'POST') {
     const code = typeof body?.code === 'string' ? `, error code ${body.code}` : ''
     throw new Error(`The Zentrola management request failed (HTTP ${response.status}${code}).`)
   }
-  if (!body?.data || typeof body.data !== 'object') throw new Error('Zentrola returned invalid member management data.')
+  if (!body?.data || typeof body.data !== 'object') throw committedWithoutResult(response.status)
   return body.data
+}
+
+function committedWithoutResult(status) {
+  return new Error(`Zentrola accepted the request (HTTP ${status}) but returned no usable result. The operation was most likely completed; do not retry. Verify it in the Zentrola admin console.`)
+}
+
+function warningText(warnings) {
+  return warnings.length ? `\nWarning: Zentrola returned unexpected data (${warnings.join('; ')}). Ask an administrator to verify this operation.` : ''
+}
+
+function newKeyWarnings(key) {
+  const warnings = []
+  if (key.canManageMembers !== false) warnings.push('the new Key is not reported as lacking member management permission')
+  if (key.canViewUpstreamQuota !== false) warnings.push('the new Key is not reported as lacking upstream quota permission')
+  return warnings
 }
 
 async function listGroups(argumentsValue) {
@@ -961,30 +984,33 @@ async function createMember(argumentsValue) {
     ...(args.remark === undefined ? {} : { remark: args.remark.trim() }),
     groupIds: args.groupIds,
   })
-  if (typeof data.id !== 'string' || data.status !== 'ACTIVE' ||
-      typeof data.key?.key !== 'string' || data.key.canManageMembers !== false) {
-    throw new Error('Zentrola returned invalid member management data.')
-  }
-  return { content: [{ type: 'text', text: `Created active ordinary member ${data.name} (ID ${data.id}). One-time Virtual Key: ${data.key.key}` }], structuredContent: data }
+  // The member and Key are committed: deliver the one-time Key whenever present and only warn about shape drift, so it is never lost or retried.
+  if (typeof data.key?.key !== 'string') throw committedWithoutResult(201)
+  const warnings = newKeyWarnings(data.key)
+  if (typeof data.id !== 'string') warnings.push('the member ID is missing')
+  if (data.status !== 'ACTIVE') warnings.push(`the member status is ${data.status ?? 'missing'}`)
+  const text = `Created active ordinary member ${data.name ?? args.name.trim()} (ID ${data.id ?? 'unknown'}). One-time Virtual Key: ${data.key.key}${warningText(warnings)}`
+  return { content: [{ type: 'text', text }], structuredContent: data }
 }
 
 async function issueMemberKey(argumentsValue) {
   const args = managementArguments(argumentsValue, ['memberId', 'name'], ['memberId', 'name'])
   const data = await mutateMember(`manage/members/${args.memberId}/keys`, { name: args.name.trim() })
-  if (typeof data.id !== 'string' || typeof data.key !== 'string' || data.canManageMembers !== false) {
-    throw new Error('Zentrola returned invalid member management data.')
-  }
-  return { content: [{ type: 'text', text: `Issued an active ordinary Virtual Key for member ${args.memberId}. One-time Virtual Key: ${data.key}` }], structuredContent: data }
+  if (typeof data.key !== 'string') throw committedWithoutResult(201)
+  const warnings = newKeyWarnings(data)
+  if (typeof data.id !== 'string') warnings.push('the Key ID is missing')
+  const text = `Issued an active ordinary Virtual Key for member ${args.memberId}. One-time Virtual Key: ${data.key}${warningText(warnings)}`
+  return { content: [{ type: 'text', text }], structuredContent: data }
 }
 
 async function setMemberStatus(argumentsValue) {
   const args = managementArguments(argumentsValue, ['memberId', 'status'], ['memberId', 'status'])
   const data = await mutateMember(`manage/members/${args.memberId}/status`, { status: args.status }, 'PUT')
-  if (data.id !== args.memberId || data.status !== args.status) {
-    throw new Error('Zentrola returned invalid member management data.')
-  }
+  const warnings = []
+  if (data.id !== args.memberId) warnings.push(`the response refers to member ${data.id ?? 'unknown'}`)
+  if (data.status !== args.status) warnings.push(`the reported status is ${data.status ?? 'missing'}`)
   const action = args.status === 'ACTIVE' ? 'Enabled' : 'Disabled'
-  return { content: [{ type: 'text', text: `${action} ordinary member ${args.memberId}.` }], structuredContent: data }
+  return { content: [{ type: 'text', text: `${action} ordinary member ${args.memberId}.${warningText(warnings)}` }], structuredContent: data }
 }
 
 async function getProvider(argumentsValue) {
