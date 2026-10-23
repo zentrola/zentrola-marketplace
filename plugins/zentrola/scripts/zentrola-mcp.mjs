@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola', version: '0.4.0' }
+const serverInfo = { name: 'zentrola', version: '0.4.1' }
 const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
@@ -60,12 +60,11 @@ const quotaTool = {
 
 const upstreamQuotaTool = {
   name: 'get_upstream_quota',
-  title: 'Get current subscription quota',
-  description: 'Get the saved quota snapshot for the subscription used by this Access Key’s latest successful request for a model. Requires per-key authorization.',
+  title: 'Get provider subscription quotas',
+  description: 'Get the saved quota snapshots of every provider subscription account this Access Key can be routed to, one entry per account. Optionally filter by provider name, for example OpenAI. Requires per-key authorization.',
   inputSchema: {
     type: 'object',
-    properties: { model: { type: 'string', minLength: 1, description: 'Model identifier.' } },
-    required: ['model'],
+    properties: { provider: { type: 'string', minLength: 1, description: 'Optional provider name filter, matched case-insensitively as a substring, for example OpenAI.' } },
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -843,25 +842,80 @@ async function getQuota(argumentsValue) {
   return { content: [{ type: 'text', text: lines.join('\n') }], structuredContent: data }
 }
 
+function upstreamQuotaProvider(argumentsValue) {
+  if (argumentsValue === null || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
+    throw new Error('get_upstream_quota arguments must be an object.')
+  }
+  if (Object.keys(argumentsValue).some((key) => key !== 'provider')) {
+    throw new Error('get_upstream_quota accepts only provider.')
+  }
+  if (argumentsValue.provider === undefined) return undefined
+  if (typeof argumentsValue.provider !== 'string' || !argumentsValue.provider.trim()) {
+    throw new Error('get_upstream_quota provider must be a non-empty string.')
+  }
+  return argumentsValue.provider.trim()
+}
+
+function validTimestamp(value) {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value))
+}
+
+function validUpstreamAccount(account) {
+  return account !== null && typeof account === 'object' &&
+    typeof account.providerName === 'string' && typeof account.subscriptionName === 'string' &&
+    ['KNOWN', 'UNKNOWN'].includes(account.status) && Array.isArray(account.quotas) &&
+    (account.checkedAt === null || validTimestamp(account.checkedAt)) &&
+    account.quotas.every((item) => item !== null && typeof item === 'object' && typeof item.code === 'string' &&
+      (item.usedPercent == null || Number.isFinite(item.usedPercent)) &&
+      (item.windowDurationSeconds == null || Number.isSafeInteger(item.windowDurationSeconds)) &&
+      (item.resetsAt == null || validTimestamp(item.resetsAt)))
+}
+
+function formatWindow(seconds) {
+  if (seconds % 86400 === 0) return `${seconds / 86400}-day window`
+  if (seconds % 3600 === 0) return `${seconds / 3600}-hour window`
+  return `${Math.round(seconds / 60)}-minute window`
+}
+
+function formatUpstreamItem(item, timezone) {
+  const label = item.name ?? (item.windowDurationSeconds ? formatWindow(item.windowDurationSeconds) : item.code)
+  const parts = [`${label}: ${item.status}`]
+  if (item.usedPercent != null) {
+    parts.push(`${Math.round(Math.min(100, Math.max(0, 100 - item.usedPercent)) * 10) / 10}% remaining`)
+  }
+  if (item.limitValue != null || item.usedValue != null || item.remainingValue != null) {
+    parts.push(`limit ${item.limitValue ?? '-'}, used ${item.usedValue ?? '-'}, remaining ${item.remainingValue ?? '-'}${item.unit ? ` ${item.unit}` : ''}`)
+  }
+  if (item.resetsAt) parts.push(`resets at ${item.resetsAt} (${formatDeviceTimestamp(item.resetsAt, timezone)})`)
+  return parts.join('; ')
+}
+
 async function getUpstreamQuota(argumentsValue) {
-  const model = quotaModel(argumentsValue, true, 'get_upstream_quota')
-  const data = await queryQuota('upstream-quota', model)
-  if (data.model !== model || !['KNOWN', 'UNKNOWN'].includes(data.status) || !Array.isArray(data.quotas)) {
+  const provider = upstreamQuotaProvider(argumentsValue)
+  const data = await queryQuota('upstream-quota')
+  if (!Array.isArray(data) || !data.every(validUpstreamAccount)) {
     throw new Error('Zentrola returned invalid upstream quota data.')
   }
-  const lines = [
-    `Subscription: ${data.subscriptionName ?? '-'} (${data.providerName ?? '-'})`,
-    `Model: ${model}`,
-    `Quota status: ${data.status}`,
-    `Last checked: ${data.checkedAt ?? '-'}`,
-  ]
-  if (data.status === 'KNOWN') {
-    for (const item of data.quotas) {
-      lines.push(`${item.name ?? item.code}: ${item.status}; limit ${item.limitValue ?? '-'}, used ${item.usedValue ?? '-'}, remaining ${item.remainingValue ?? '-'}${item.unit ? ` ${item.unit}` : ''}`)
+  const accounts = provider
+    ? data.filter((account) => account.providerName.toLowerCase().includes(provider.toLowerCase()))
+    : data
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  const lines = []
+  for (const account of accounts) {
+    if (lines.length) lines.push('')
+    lines.push(
+      `Subscription: ${account.subscriptionName} (${account.providerName})`,
+      `Quota status: ${account.status}`,
+      `Last checked: ${account.checkedAt ? `${account.checkedAt} (${formatDeviceTimestamp(account.checkedAt, timezone)})` : '-'}`,
+    )
+    if (account.status === 'KNOWN') {
+      for (const item of account.quotas) lines.push(formatUpstreamItem(item, timezone))
     }
   }
-  const text = lines.join('\n')
-  return { content: [{ type: 'text', text }], structuredContent: data }
+  if (!lines.length) {
+    lines.push(provider ? `No subscription accounts found for provider ${provider}.` : 'No subscription accounts found.')
+  }
+  return { content: [{ type: 'text', text: lines.join('\n') }], structuredContent: { timezone, accounts } }
 }
 
 function validManagementText(value, maxBytes) {
@@ -1154,7 +1208,7 @@ async function handle(request) {
           capabilities: { tools: { listChanged: false } },
           serverInfo,
           instructions:
-            'Use get_usage for token consumption, get_quota for current-month personal and model quota, get_upstream_quota for the authorized current subscription snapshot, list_groups, create_member, issue_member_key, and set_member_status for explicitly requested member management, get_provider for a model provider, and generate_image to create a PNG. Management tools require individual Key authorization and return a Key only once. All tools reuse the active client configuration.',
+            'Use get_usage for token consumption, get_quota for current-month personal and model quota, get_upstream_quota for authorized provider subscription quota snapshots, list_groups, create_member, issue_member_key, and set_member_status for explicitly requested member management, get_provider for a model provider, and generate_image to create a PNG. Management tools require individual Key authorization and return a Key only once. All tools reuse the active client configuration.',
         },
       })
       return

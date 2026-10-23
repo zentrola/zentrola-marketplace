@@ -117,7 +117,7 @@ async function callQuota(rpc, argumentsValue = {}) {
   return rpc(6, 'tools/call', { name: 'get_quota', arguments: argumentsValue })
 }
 
-async function callUpstreamQuota(rpc, argumentsValue = { model: 'gpt-5.6-sol' }) {
+async function callUpstreamQuota(rpc, argumentsValue = {}) {
   return rpc(7, 'tools/call', { name: 'get_upstream_quota', arguments: argumentsValue })
 }
 
@@ -127,8 +127,8 @@ test('quota tools use the active key and preserve unknown upstream state', async
     requests.push({ url: request.url, authorization: request.headers.authorization })
     if (request.url === '/api/v1/me/quota?model=gpt-5.6-sol') {
       respondJson(response, { code: 'OK', data: { usedTokens: '100', personalLimit: '200', personalRemaining: '100', effectiveRemaining: '50', periodStart: '2026-10-01T00:00:00Z', periodEnd: '2026-11-01T00:00:00Z', model: 'gpt-5.6-sol' } })
-    } else if (request.url === '/api/v1/me/upstream-quota?model=gpt-5.6-sol') {
-      respondJson(response, { code: 'OK', data: { model: 'gpt-5.6-sol', status: 'UNKNOWN', checkedAt: null, quotas: [] } })
+    } else if (request.url === '/api/v1/me/upstream-quota') {
+      respondJson(response, { code: 'OK', data: [{ providerName: 'OpenAI', subscriptionName: 'Codex A', status: 'UNKNOWN', checkedAt: null, quotas: [] }] })
     } else { respondJson(response, { code: 'NOT_FOUND' }, 404) }
   })
   const { port } = api.address()
@@ -138,9 +138,10 @@ test('quota tools use the active key and preserve unknown upstream state', async
   assert.equal(quota.result.structuredContent.effectiveRemaining, '50')
   assert.match(quota.result.content[0].text, /Personal remaining: 100/)
   const upstream = await callUpstreamQuota(rpc)
-  assert.equal(upstream.result.structuredContent.status, 'UNKNOWN')
+  assert.equal(upstream.result.structuredContent.accounts[0].status, 'UNKNOWN')
   assert.match(upstream.result.content[0].text, /Quota status: UNKNOWN/)
-  assert.deepEqual(requests.map((request) => request.url), ['/api/v1/me/quota?model=gpt-5.6-sol', '/api/v1/me/upstream-quota?model=gpt-5.6-sol'])
+  assert.match(upstream.result.content[0].text, /Last checked: -/)
+  assert.deepEqual(requests.map((request) => request.url), ['/api/v1/me/quota?model=gpt-5.6-sol', '/api/v1/me/upstream-quota'])
   assert.ok(requests.every((request) => request.authorization === 'Bearer vk-test-key'))
 })
 
@@ -150,18 +151,42 @@ test('upstream quota text includes saved item values and rejects unauthorized ke
       respondJson(response, { code: 'FORBIDDEN' }, 403)
       return
     }
-    respondJson(response, { code: 'OK', data: {
-      model: 'gpt-5.6-sol', status: 'KNOWN', subscriptionName: 'Primary', providerName: 'Example',
-      checkedAt: '2026-10-23T00:00:00Z', quotas: [{ code: 'tokens', name: 'Tokens', status: 'AVAILABLE',
-        limitValue: '1000', usedValue: '300', remainingValue: '700', unit: 'tokens' }],
-    } })
+    if (request.url !== '/api/v1/me/upstream-quota') {
+      respondJson(response, { code: 'BAD_REQUEST' }, 400)
+      return
+    }
+    respondJson(response, { code: 'OK', data: [
+      { status: 'KNOWN', subscriptionName: 'Primary', providerName: 'Example',
+        checkedAt: '2026-10-23T00:00:00Z', quotas: [{ code: 'tokens', name: 'Tokens', status: 'AVAILABLE',
+          limitValue: '1000', usedValue: '300', remainingValue: '700', unit: 'tokens' }] },
+      { status: 'KNOWN', subscriptionName: 'Codex A', providerName: 'OpenAI', checkedAt: '2026-10-24T01:00:00Z',
+        quotas: [{ code: 'secondary', name: null, status: 'AVAILABLE', usedPercent: 1, windowDurationSeconds: 604800,
+          resetsAt: '2026-10-30T02:45:00Z', observedAt: '2026-10-24T01:00:00Z' }] },
+      { status: 'UNKNOWN', subscriptionName: 'Codex B', providerName: 'OpenAI Codex', checkedAt: null, quotas: [] },
+    ] })
   })
   const { port } = api.address()
   const environment = { ZENTROLA_BASE_URL: `http://127.0.0.1:${port}/v1`, ZENTROLA_VIRTUAL_KEY: 'vk-allowed' }
   const { rpc } = startMcp(t, 'codex', environment)
   await initialize(rpc)
   const quota = await callUpstreamQuota(rpc)
+  assert.equal(quota.result.structuredContent.accounts.length, 3)
   assert.match(quota.result.content[0].text, /Tokens: AVAILABLE; limit 1000, used 300, remaining 700 tokens/)
+
+  const openai = await callUpstreamQuota(rpc, { provider: ' openai ' })
+  assert.deepEqual(openai.result.structuredContent.accounts.map(({ subscriptionName }) => subscriptionName), ['Codex A', 'Codex B'])
+  const text = openai.result.content[0].text
+  assert.match(text, /Subscription: Codex A \(OpenAI\)/)
+  assert.match(text, /7-day window: AVAILABLE; 99% remaining; resets at 2026-10-30T02:45:00Z \(2026-10-\d{2}T\d{2}:\d{2}:00(?:Z|[+-]\d{2}:\d{2})\)/)
+  assert.match(text, /Subscription: Codex B \(OpenAI Codex\)\nQuota status: UNKNOWN/)
+  assert.doesNotMatch(text, /Primary/)
+
+  const none = await callUpstreamQuota(rpc, { provider: 'Missing' })
+  assert.match(none.result.content[0].text, /No subscription accounts found for provider Missing/)
+
+  const legacy = await callUpstreamQuota(rpc, { model: 'gpt-5.6-sol' })
+  assert.equal(legacy.result.isError, true)
+  assert.match(legacy.result.content[0].text, /accepts only provider/)
 
   const denied = startMcp(t, 'codex', { ...environment, ZENTROLA_VIRTUAL_KEY: 'vk-denied' })
   await initialize(denied.rpc)
