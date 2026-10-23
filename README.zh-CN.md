@@ -8,7 +8,7 @@ Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可直�
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
-| Claude Code | `/imagegen <描述>` 生成图片；`/usage` 查询用量；`/quota` 查询个人额度；`/upstream-quota gpt-5.6-sol` 查询当前订阅额度；`/member-management <请求>` 管理普通成员与 Key；`/provider gpt-5.6-sol` 查询服务商 |
+| Claude Code | `/imagegen <描述>` 生成图片；`/usage` 查询用量；`/quota` 查询个人额度；`/upstream-quota gpt-5.6-sol` 查询当前订阅额度；`/member-management <请求>` 查询分组、管理普通成员与 Key；`/provider gpt-5.6-sol` 查询服务商 |
 | Codex | `$zentrola:imagegen <描述>`、`$zentrola:usage`、`$zentrola:quota`、`$zentrola:upstream-quota gpt-5.6-sol`、`$zentrola:member-management <请求>` 或 `$zentrola:provider gpt-5.6-sol` |
 
 Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法，如 `$zentrola:imagegen`。Claude Code 使用 `/imagegen` 等包装层，两端使用插件中相同的 Skill。
@@ -19,7 +19,7 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
 
 `get_quota` 返回当前 UTC 月所有模型的 Token 总用量与个人额度；指定模型时，再返回个人与适用用户组中最小的剩余额度。`get_upstream_quota` 需要按 Key 单独授权，只读取该 Key 指定模型最近一次成功请求所用订阅号的额度快照。无数据或快照过期时返回未知，不触发上游实时探测。
 
-`create_member` 一次创建普通成员和已启用的首把 Virtual Key；`issue_member_key` 为已有普通成员签发 Key 并启用该成员。两项操作都要求调用方 Key 单独获得成员管理授权，不能创建管理员，也不会把管理权限授予新 Key。完整新 Key 只返回一次。
+`list_groups` 列出启用分组，供创建成员时选择；`create_member` 创建普通成员并加入至少一个分组，同时签发已启用的首把 Virtual Key；`issue_member_key` 为已有普通成员签发 Key，不改变成员状态，停用成员返回 `MEMBER_DISABLED`；`set_member_status` 启用或停用普通成员，停用后该成员全部 Key 立即无法使用但不注销，启用要求成员至少有一把有效 Key。这些操作都要求调用方 Key 单独获得成员管理授权，不能操作调用者本人或持有管理授权的成员，不能创建管理员，也不会把管理权限授予新 Key。完整新 Key 只返回一次。
 
 ## 目录结构
 
@@ -50,7 +50,7 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
     │   │   └── agents/openai.yaml
     │   ├── quota                         # 个人 Token 额度查询
     │   ├── upstream-quota                # 授权订阅额度快照
-    │   ├── member-management             # 明确请求的普通成员写操作
+    │   ├── member-management             # 分组查询与明确请求的普通成员操作
     │   ├── provider                      # 服务商查询流程
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml

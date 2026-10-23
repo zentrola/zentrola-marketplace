@@ -8,7 +8,7 @@ The Zentrola marketplace for plugins and skills. It currently contains the `zent
 
 | Client | How to invoke after installation |
 | --- | --- |
-| Claude Code | `/imagegen <description>` for an image; `/usage` for usage; `/quota` for personal quota; `/upstream-quota gpt-5.6-sol` for the current subscription; `/member-management <request>` for ordinary members and Keys; `/provider gpt-5.6-sol` for the provider |
+| Claude Code | `/imagegen <description>` for an image; `/usage` for usage; `/quota` for personal quota; `/upstream-quota gpt-5.6-sol` for the current subscription; `/member-management <request>` for groups, ordinary members, and Keys; `/provider gpt-5.6-sol` for the provider |
 | Codex | `$zentrola:imagegen <description>`, `$zentrola:usage`, `$zentrola:quota`, `$zentrola:upstream-quota gpt-5.6-sol`, `$zentrola:member-management <request>`, or `$zentrola:provider gpt-5.6-sol` |
 
 Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses namespaced native skill syntax such as `$zentrola:imagegen`. Claude Code uses wrappers such as `/imagegen`. Both clients use the same skills packaged by the plugin.
@@ -17,7 +17,7 @@ With no parameters, the plugin queries from the start of the current UTC calenda
 
 `get_quota` returns the current UTC month's all-model usage and personal quota; with a model, it also returns the minimum remaining quota across the member and applicable groups. `get_upstream_quota` requires per-Key authorization and returns only the saved quota snapshot for the subscription used by that Key's latest successful request for the specified model. Unknown or stale snapshots are reported as unknown, and no live upstream probe is triggered.
 
-`create_member` creates an ordinary member and an active first Virtual Key in one operation. `issue_member_key` issues an ordinary Key for an existing member and activates that member. Both require individual member-management authorization on the calling Key; neither can create an administrator or pass its management permission to a newly issued Key. The full new Key is returned only once.
+`list_groups` lists active groups for choosing where a new member belongs. `create_member` creates an ordinary member in at least one of those groups together with an active first Virtual Key. `issue_member_key` issues an ordinary Key for an existing member without changing member status; disabled members are rejected with `MEMBER_DISABLED`. `set_member_status` enables or disables an ordinary member: disabling blocks all of that member's Keys immediately without revoking them, and enabling requires at least one valid Key. These tools require individual member-management authorization on the calling Key, cannot target the caller or members holding management permission, cannot create an administrator, and never pass management permission to a newly issued Key. The full new Key is returned only once.
 
 The image tool calls Zentrola's `/v1/responses` endpoint directly and does not access the ChatGPT Codex upstream. Requests always use `store: false`, `stream: true`, and the `image_generation` tool. The default model is `gpt-5.6-sol`, while callers may explicitly select another model. The MCP incrementally reads the SSE stream, takes the PNG from the completed event's `result` or the latest `partial_image_b64`, validates it, and returns native MCP `image` content. The parser has no fixed 64 KiB line limit and supports multi-megabyte image events.
 
@@ -50,7 +50,7 @@ The image tool calls Zentrola's `/v1/responses` endpoint directly and does not a
     │   │   └── agents/openai.yaml
     │   ├── quota                         # Monthly Token quota workflow
     │   ├── upstream-quota                # Authorized subscription quota snapshot
-    │   ├── member-management             # Explicit ordinary-member write actions
+    │   ├── member-management             # Groups and explicit ordinary-member actions
     │   ├── provider                      # Provider lookup workflow
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml

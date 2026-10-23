@@ -175,37 +175,93 @@ test('member management tools create only ordinary active members and Keys', asy
   const api = await startApi(t, async (request, response) => {
     let payload = ''
     for await (const chunk of request) payload += chunk
-    requests.push({ method: request.method, url: request.url, authorization: request.headers.authorization, body: JSON.parse(payload) })
+    requests.push({ method: request.method, url: request.url, authorization: request.headers.authorization, body: payload ? JSON.parse(payload) : undefined })
     if (request.headers.authorization === 'Bearer vk-denied') {
       respondJson(response, { code: 'FORBIDDEN' }, 403)
+    } else if (request.url.startsWith('/api/v1/me/manage/groups')) {
+      respondJson(response, { code: 'OK', data: { items: [{ id: '7', code: 'dev', name: 'Developers', remark: null, status: 'ACTIVE' }], nextCursor: '7', total: 2 } })
     } else if (request.url === '/api/v1/me/manage/members') {
       respondJson(response, { code: 'OK', data: { id: '123', name: 'Alice', status: 'ACTIVE', key: { id: '124', key: 'vk-new', canManageMembers: false } } }, 201)
     } else if (request.url === '/api/v1/me/manage/members/123/keys') {
       respondJson(response, { code: 'OK', data: { id: '125', key: 'vk-another', canManageMembers: false } }, 201)
+    } else if (request.url === '/api/v1/me/manage/members/123/status') {
+      respondJson(response, { code: 'OK', data: { id: '123', status: JSON.parse(payload).status } })
+    } else if (request.url === '/api/v1/me/manage/members/456/keys') {
+      respondJson(response, { code: 'MEMBER_DISABLED' }, 409)
     } else { respondJson(response, { code: 'NOT_FOUND' }, 404) }
   })
   const { port } = api.address()
   const environment = { ZENTROLA_BASE_URL: `http://127.0.0.1:${port}/v1`, ZENTROLA_VIRTUAL_KEY: 'vk-authorized' }
   const { rpc } = startMcp(t, 'codex', environment)
   await initialize(rpc)
-  const invalid = await rpc(9, 'tools/call', { name: 'create_member', arguments: { name: 'Alice', keyName: 'First', isAdmin: true } })
-  assert.equal(invalid.result.isError, true)
+  for (const [id, args] of [
+    [9, { name: 'Alice', keyName: 'First', groupIds: ['7'], isAdmin: true }],
+    [10, { name: 'Alice', keyName: 'First' }],
+    [11, { name: 'Alice', keyName: 'First', groupIds: [] }],
+  ]) {
+    const invalid = await rpc(id, 'tools/call', { name: 'create_member', arguments: args })
+    assert.equal(invalid.result.isError, true)
+  }
+  for (const [id, name, args] of [
+    [12, 'set_member_status', { memberId: '123', status: 'DELETED' }],
+    [13, 'set_member_status', { memberId: '123' }],
+    [14, 'list_groups', { limit: 0 }],
+    [15, 'list_groups', { after: 'abc' }],
+    [16, 'list_groups', { status: 'DISABLED' }],
+  ]) {
+    const invalid = await rpc(id, 'tools/call', { name, arguments: args })
+    assert.equal(invalid.result.isError, true, `${name} accepted ${JSON.stringify(args)}`)
+  }
   assert.equal(requests.length, 0)
-  const created = await rpc(10, 'tools/call', { name: 'create_member', arguments: { name: 'Alice', keyName: 'First', groupIds: ['7'] } })
+
+  const groups = await rpc(17, 'tools/call', { name: 'list_groups', arguments: { after: '99', limit: 1 } })
+  assert.equal(groups.result.isError, undefined)
+  assert.match(groups.result.content[0].text, /Developers \(ID 7, code dev\)/)
+  assert.match(groups.result.content[0].text, /after=7/)
+  const created = await rpc(18, 'tools/call', { name: 'create_member', arguments: { name: 'Alice', keyName: 'First', groupIds: ['7'] } })
   assert.equal(created.result.structuredContent.status, 'ACTIVE')
   assert.match(created.result.content[0].text, /vk-new/)
-  const issued = await rpc(11, 'tools/call', { name: 'issue_member_key', arguments: { memberId: '123', name: 'Second' } })
+  const issued = await rpc(19, 'tools/call', { name: 'issue_member_key', arguments: { memberId: '123', name: 'Second' } })
   assert.match(issued.result.content[0].text, /vk-another/)
-  assert.deepEqual(requests.map((entry) => entry.url), ['/api/v1/me/manage/members', '/api/v1/me/manage/members/123/keys'])
-  assert.ok(requests.every((entry) => entry.method === 'POST' && entry.authorization === 'Bearer vk-authorized'))
-  assert.deepEqual(requests[0].body, { name: 'Alice', keyName: 'First', groupIds: ['7'] })
+  const disabled = await rpc(20, 'tools/call', { name: 'set_member_status', arguments: { memberId: '123', status: 'DISABLED' } })
+  assert.equal(disabled.result.structuredContent.status, 'DISABLED')
+  assert.match(disabled.result.content[0].text, /Disabled ordinary member 123/)
+  const enabled = await rpc(21, 'tools/call', { name: 'set_member_status', arguments: { memberId: '123', status: 'ACTIVE' } })
+  assert.match(enabled.result.content[0].text, /Enabled ordinary member 123/)
+  const rejected = await rpc(22, 'tools/call', { name: 'issue_member_key', arguments: { memberId: '456', name: 'Blocked' } })
+  assert.equal(rejected.result.isError, true)
+  assert.match(rejected.result.content[0].text, /MEMBER_DISABLED/)
+
+  assert.deepEqual(requests.map((entry) => `${entry.method} ${entry.url}`), [
+    'GET /api/v1/me/manage/groups?after=99&limit=1',
+    'POST /api/v1/me/manage/members',
+    'POST /api/v1/me/manage/members/123/keys',
+    'PUT /api/v1/me/manage/members/123/status',
+    'PUT /api/v1/me/manage/members/123/status',
+    'POST /api/v1/me/manage/members/456/keys',
+  ])
+  assert.ok(requests.every((entry) => entry.authorization === 'Bearer vk-authorized'))
+  assert.deepEqual(requests[1].body, { name: 'Alice', keyName: 'First', groupIds: ['7'] })
+  assert.deepEqual(requests[3].body, { status: 'DISABLED' })
 
   const denied = startMcp(t, 'codex', { ...environment, ZENTROLA_VIRTUAL_KEY: 'vk-denied' })
   await initialize(denied.rpc)
-  const result = await denied.rpc(12, 'tools/call', { name: 'create_member', arguments: { name: 'Alice', keyName: 'First' } })
-  assert.equal(result.result.isError, true)
-  assert.match(result.result.content[0].text, /HTTP 403/)
+  for (const [id, name, args] of [
+    [23, 'create_member', { name: 'Alice', keyName: 'First', groupIds: ['7'] }],
+    [24, 'list_groups', {}],
+    [25, 'set_member_status', { memberId: '123', status: 'DISABLED' }],
+  ]) {
+    const result = await denied.rpc(id, 'tools/call', { name, arguments: args })
+    assert.equal(result.result.isError, true)
+    assert.match(result.result.content[0].text, /HTTP 403/)
+  }
 })
+
+function toolNamed(listed, name) {
+  const tool = listed.result.tools.find((candidate) => candidate.name === name)
+  assert.ok(tool, `missing tool ${name}`)
+  return tool
+}
 
 async function callProvider(rpc, argumentsValue = { model: 'gpt-5.6-sol' }) {
   return rpc(4, 'tools/call', { name: 'get_provider', arguments: argumentsValue })
@@ -255,8 +311,10 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     'get_usage',
     'get_quota',
     'get_upstream_quota',
+    'list_groups',
     'create_member',
     'issue_member_key',
+    'set_member_status',
     'get_provider',
     'generate_image',
   ])
@@ -291,7 +349,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['tokens', 'from', 'to', 'timezone', 'fromLocal', 'toLocal'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[5].inputSchema, {
+  assert.deepEqual(toolNamed(listed, 'get_provider').inputSchema, {
     type: 'object',
     properties: {
       model: {
@@ -303,7 +361,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['model'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[5].outputSchema, {
+  assert.deepEqual(toolNamed(listed, 'get_provider').outputSchema, {
     type: 'object',
     properties: {
       name: { type: 'string' },
@@ -311,7 +369,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['name'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[6].inputSchema, {
+  assert.deepEqual(toolNamed(listed, 'generate_image').inputSchema, {
     type: 'object',
     properties: {
       prompt: {

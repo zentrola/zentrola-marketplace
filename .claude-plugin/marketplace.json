@@ -11,7 +11,7 @@
       "name": "zentrola",
       "source": "./plugins/zentrola",
       "description": "Generate images, query Zentrola account information, and manage ordinary members with an authorized Key.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "author": {
         "name": "Zentrola"
       },
