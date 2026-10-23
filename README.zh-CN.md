@@ -2,20 +2,22 @@
 
 [English](./README.md) | 简体中文
 
-Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可直接通过 Zentrola 生成图片、查询 Token 使用量和当前服务商，并提供第三方 Skill 推荐入口。
+Zentrola Plugin 与 Skill Marketplace。当前包含 `zentrola` 插件，可直接通过 Zentrola 生成图片、查询 Token 使用量与额度和当前服务商，并提供第三方 Skill 推荐入口。
 
 ## 客户端入口
 
 | 客户端 | 安装后调用方式 |
 | --- | --- |
-| Claude Code | `/imagegen <描述>` 生成图片；`/usage` 查询用量；`/provider gpt-5.6-sol` 查询服务商 |
-| Codex | `$zentrola:imagegen <描述>`、`$zentrola:usage` 或 `$zentrola:provider gpt-5.6-sol` |
+| Claude Code | `/imagegen <描述>` 生成图片；`/usage` 查询用量；`/quota` 查询个人额度；`/upstream-quota gpt-5.6-sol` 查询当前订阅额度；`/provider gpt-5.6-sol` 查询服务商 |
+| Codex | `$zentrola:imagegen <描述>`、`$zentrola:usage`、`$zentrola:quota`、`$zentrola:upstream-quota gpt-5.6-sol` 或 `$zentrola:provider gpt-5.6-sol` |
 
 Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自定义 slash command；因此 Codex 使用带插件命名空间的原生 Skill 语法，如 `$zentrola:imagegen`。Claude Code 使用 `/imagegen` 等包装层，两端使用插件中相同的 Skill。
 
 默认不传参数时查询当前 UTC 自然月起至当前时刻。用户说出时间范围时，Skill 会将自然语言转换为 `from`（含）与 `to`（不含）两个以 `Z` 结尾的 UTC RFC3339 时间并调用接口；例如“查询 9 月 1 日到 9 月 15 日的用量”。日期范围最长 366 天。工具保留服务端返回的 UTC 原始时间，同时按运行插件的设备时区生成面向用户的起止时间。服务商查询调用 `/api/v1/me/provider?model=<model>`，并返回服务端提供的 `data.name`。
 
 图片生成工具直接向 Zentrola `/v1/responses` 发起请求，不访问 ChatGPT Codex 上游。请求固定使用 `store: false`、`stream: true` 和 `image_generation` tool；默认模型为 `gpt-5.6-sol`，也可显式传入其他模型。MCP 增量读取 SSE，从 `response.image_generation_call.completed` 的 `result` 或最新的 `partial_image_b64` 获取图片，验证 PNG 后以 MCP 原生 `image` 内容返回。解析器不使用固定 64 KiB 行缓冲，可处理数 MiB 的图片事件。
+
+`get_quota` 返回当前 UTC 月所有模型的 Token 总用量与个人额度；指定模型时，再返回个人与适用用户组中最小的剩余额度。`get_upstream_quota` 需要按 Key 单独授权，只读取该 Key 指定模型最近一次成功请求所用订阅号的额度快照。无数据或快照过期时返回未知，不触发上游实时探测。
 
 ## 目录结构
 

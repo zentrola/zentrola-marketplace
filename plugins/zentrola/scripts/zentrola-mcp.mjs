@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola', version: '0.2.1' }
+const serverInfo = { name: 'zentrola', version: '0.2.2' }
 const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
@@ -41,6 +41,31 @@ const usageTool = {
       toLocal: { type: 'string' },
     },
     required: ['tokens', 'from', 'to', 'timezone', 'fromLocal', 'toLocal'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+}
+
+const quotaTool = {
+  name: 'get_quota',
+  title: 'Get my Zentrola token quota',
+  description: 'Get current UTC-month token usage and personal quota. Optionally provide a model to calculate the minimum remaining quota across the user and applicable groups.',
+  inputSchema: {
+    type: 'object',
+    properties: { model: { type: 'string', minLength: 1, description: 'Optional model identifier.' } },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+}
+
+const upstreamQuotaTool = {
+  name: 'get_upstream_quota',
+  title: 'Get current subscription quota',
+  description: 'Get the saved quota snapshot for the subscription used by this Access Key’s latest successful request for a model. Requires per-key authorization.',
+  inputSchema: {
+    type: 'object',
+    properties: { model: { type: 'string', minLength: 1, description: 'Model identifier.' } },
+    required: ['model'],
     additionalProperties: false,
   },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -110,7 +135,7 @@ const imageGenerationTool = {
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
 }
 
-const tools = [usageTool, providerTool, imageGenerationTool]
+const tools = [usageTool, quotaTool, upstreamQuotaTool, providerTool, imageGenerationTool]
 
 function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -699,6 +724,81 @@ async function getUsage(argumentsValue) {
   }
 }
 
+function quotaModel(argumentsValue, required, toolName) {
+  if (argumentsValue === null || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
+    throw new Error(`${toolName} arguments must be an object.`)
+  }
+  if (Object.keys(argumentsValue).some((key) => key !== 'model')) {
+    throw new Error(`${toolName} accepts only model.`)
+  }
+  if (argumentsValue.model === undefined && !required) return undefined
+  if (typeof argumentsValue.model !== 'string' || !argumentsValue.model.trim()) {
+    throw new Error(`${toolName} model must be a non-empty string.`)
+  }
+  return argumentsValue.model.trim()
+}
+
+async function queryQuota(resource, model) {
+  const { baseURL, apiKey, suffix } = await pairFromCurrentClient()
+  const endpoint = meEndpoint(baseURL, suffix, resource)
+  if (model) endpoint.searchParams.set('model', model)
+  let response
+  try {
+    response = await fetch(endpoint, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch (error) {
+    if (error?.name === 'TimeoutError') throw new Error('The connection to Zentrola timed out.')
+    throw new Error('Unable to connect to the Zentrola service.')
+  }
+  let body
+  try { body = await response.json() }
+  catch { throw new Error(`Zentrola returned an unreadable response (HTTP ${response.status}).`) }
+  if (!response.ok) {
+    const code = typeof body?.code === 'string' ? `, error code ${body.code}` : ''
+    throw new Error(`The Zentrola query failed (HTTP ${response.status}${code}).`)
+  }
+  if (!body?.data || typeof body.data !== 'object') {
+    throw new Error('Zentrola returned invalid quota data.')
+  }
+  return body.data
+}
+
+async function getQuota(argumentsValue) {
+  const model = quotaModel(argumentsValue, false, 'get_quota')
+  const data = await queryQuota('quota', model)
+  if (typeof data.usedTokens !== 'string' || typeof data.periodStart !== 'string' || typeof data.periodEnd !== 'string') {
+    throw new Error('Zentrola returned invalid quota data.')
+  }
+  const lines = [`Current-month token usage: ${data.usedTokens}`, `Period: ${data.periodStart} to ${data.periodEnd}`]
+  lines.push(`Personal quota: ${data.personalLimit ?? 'unlimited'}`)
+  lines.push(`Personal remaining: ${data.personalRemaining ?? 'unlimited'}`)
+  if (model) lines.push(`Remaining for ${model}: ${data.effectiveRemaining ?? 'unlimited'}`)
+  return { content: [{ type: 'text', text: lines.join('\n') }], structuredContent: data }
+}
+
+async function getUpstreamQuota(argumentsValue) {
+  const model = quotaModel(argumentsValue, true, 'get_upstream_quota')
+  const data = await queryQuota('upstream-quota', model)
+  if (data.model !== model || !['KNOWN', 'UNKNOWN'].includes(data.status) || !Array.isArray(data.quotas)) {
+    throw new Error('Zentrola returned invalid upstream quota data.')
+  }
+  const lines = [
+    `Subscription: ${data.subscriptionName ?? '-'} (${data.providerName ?? '-'})`,
+    `Model: ${model}`,
+    `Quota status: ${data.status}`,
+    `Last checked: ${data.checkedAt ?? '-'}`,
+  ]
+  if (data.status === 'KNOWN') {
+    for (const item of data.quotas) {
+      lines.push(`${item.name ?? item.code}: ${item.status}; limit ${item.limitValue ?? '-'}, used ${item.usedValue ?? '-'}, remaining ${item.remainingValue ?? '-'}${item.unit ? ` ${item.unit}` : ''}`)
+    }
+  }
+  const text = lines.join('\n')
+  return { content: [{ type: 'text', text }], structuredContent: data }
+}
+
 async function getProvider(argumentsValue) {
   if (
     argumentsValue === null ||
@@ -818,6 +918,8 @@ async function generateImage(argumentsValue) {
 
 const toolHandlers = new Map([
   [usageTool.name, getUsage],
+  [quotaTool.name, getQuota],
+  [upstreamQuotaTool.name, getUpstreamQuota],
   [providerTool.name, getProvider],
   [imageGenerationTool.name, generateImage],
 ])
@@ -834,7 +936,7 @@ async function handle(request) {
           capabilities: { tools: { listChanged: false } },
           serverInfo,
           instructions:
-            'Use get_usage for token consumption, get_provider with a model identifier for the current service provider name, and generate_image to create a PNG through Zentrola. All tools reuse the active client configuration.',
+            'Use get_usage for token consumption, get_quota for current-month personal and model quota, get_upstream_quota for the authorized current subscription snapshot, get_provider for a model provider, and generate_image to create a PNG. All tools reuse the active client configuration.',
         },
       })
       return

@@ -2,18 +2,20 @@
 
 English | [简体中文](./README.zh-CN.md)
 
-The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose skills generate images directly through Zentrola, query token usage and the current service provider, and recommend third-party skills.
+The Zentrola marketplace for plugins and skills. It currently contains the `zentrola` plugin, whose skills generate images directly through Zentrola, query token usage and quotas, identify the current service provider, and recommend third-party skills.
 
 ## Client entry points
 
 | Client | How to invoke after installation |
 | --- | --- |
-| Claude Code | `/imagegen <description>` for an image; `/usage` for usage; `/provider gpt-5.6-sol` for the provider |
-| Codex | `$zentrola:imagegen <description>`, `$zentrola:usage`, or `$zentrola:provider gpt-5.6-sol` |
+| Claude Code | `/imagegen <description>` for an image; `/usage` for usage; `/quota` for personal quota; `/upstream-quota gpt-5.6-sol` for the current subscription; `/provider gpt-5.6-sol` for the provider |
+| Codex | `$zentrola:imagegen <description>`, `$zentrola:usage`, `$zentrola:quota`, `$zentrola:upstream-quota gpt-5.6-sol`, or `$zentrola:provider gpt-5.6-sol` |
 
 Custom prompt slash commands have been deprecated in Codex, and regular skills cannot register custom slash commands. Codex therefore uses namespaced native skill syntax such as `$zentrola:imagegen`. Claude Code uses wrappers such as `/imagegen`. Both clients use the same skills packaged by the plugin.
 
 With no parameters, the plugin queries from the start of the current UTC calendar month through the current instant. When the user gives a time range in natural language, the skill converts it into UTC RFC3339 `from` (inclusive) and `to` (exclusive) values ending in `Z`; for example, “show usage from September 1 through September 15.” A custom range can span at most 366 days. The tool preserves the UTC values returned by the service and also formats the reporting period for the device time zone used to run the plugin. Provider queries call `/api/v1/me/provider?model=<model>` and return the service-provided `data.name` value.
+
+`get_quota` returns the current UTC month's all-model usage and personal quota; with a model, it also returns the minimum remaining quota across the member and applicable groups. `get_upstream_quota` requires per-Key authorization and returns only the saved quota snapshot for the subscription used by that Key's latest successful request for the specified model. Unknown or stale snapshots are reported as unknown, and no live upstream probe is triggered.
 
 The image tool calls Zentrola's `/v1/responses` endpoint directly and does not access the ChatGPT Codex upstream. Requests always use `store: false`, `stream: true`, and the `image_generation` tool. The default model is `gpt-5.6-sol`, while callers may explicitly select another model. The MCP incrementally reads the SSE stream, takes the PNG from the completed event's `result` or the latest `partial_image_b64`, validates it, and returns native MCP `image` content. The parser has no fixed 64 KiB line limit and supports multi-megabyte image events.
 
@@ -32,6 +34,8 @@ The image tool calls Zentrola's `/v1/responses` endpoint directly and does not a
     ├── .claude-plugin/plugin.json
     ├── commands/imagegen.md              # Claude /imagegen command
     ├── commands/usage.md                 # Claude /usage command
+    ├── commands/quota.md                 # Claude /quota command
+    ├── commands/upstream-quota.md        # Claude /upstream-quota command
     ├── commands/provider.md              # Claude /provider command
     ├── scripts/zentrola-mcp.mjs          # Shared Zentrola MCP server
     ├── skills
@@ -41,6 +45,8 @@ The image tool calls Zentrola's `/v1/responses` endpoint directly and does not a
     │   ├── usage                         # Token usage workflow
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml
+    │   ├── quota                         # Monthly Token quota workflow
+    │   ├── upstream-quota                # Authorized subscription quota snapshot
     │   ├── provider                      # Provider lookup workflow
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml

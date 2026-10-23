@@ -113,6 +113,63 @@ async function callUsage(rpc, argumentsValue = {}) {
   return rpc(3, 'tools/call', { name: 'get_usage', arguments: argumentsValue })
 }
 
+async function callQuota(rpc, argumentsValue = {}) {
+  return rpc(6, 'tools/call', { name: 'get_quota', arguments: argumentsValue })
+}
+
+async function callUpstreamQuota(rpc, argumentsValue = { model: 'gpt-5.6-sol' }) {
+  return rpc(7, 'tools/call', { name: 'get_upstream_quota', arguments: argumentsValue })
+}
+
+test('quota tools use the active key and preserve unknown upstream state', async (t) => {
+  const requests = []
+  const api = await startApi(t, (request, response) => {
+    requests.push({ url: request.url, authorization: request.headers.authorization })
+    if (request.url === '/api/v1/me/quota?model=gpt-5.6-sol') {
+      respondJson(response, { code: 'OK', data: { usedTokens: '100', personalLimit: '200', personalRemaining: '100', effectiveRemaining: '50', periodStart: '2026-10-01T00:00:00Z', periodEnd: '2026-11-01T00:00:00Z', model: 'gpt-5.6-sol' } })
+    } else if (request.url === '/api/v1/me/upstream-quota?model=gpt-5.6-sol') {
+      respondJson(response, { code: 'OK', data: { model: 'gpt-5.6-sol', status: 'UNKNOWN', checkedAt: null, quotas: [] } })
+    } else { respondJson(response, { code: 'NOT_FOUND' }, 404) }
+  })
+  const { port } = api.address()
+  const { rpc } = startMcp(t, 'codex', { ZENTROLA_BASE_URL: `http://127.0.0.1:${port}/v1`, ZENTROLA_VIRTUAL_KEY: 'vk-test-key' })
+  await initialize(rpc)
+  const quota = await callQuota(rpc, { model: 'gpt-5.6-sol' })
+  assert.equal(quota.result.structuredContent.effectiveRemaining, '50')
+  assert.match(quota.result.content[0].text, /Personal remaining: 100/)
+  const upstream = await callUpstreamQuota(rpc)
+  assert.equal(upstream.result.structuredContent.status, 'UNKNOWN')
+  assert.match(upstream.result.content[0].text, /Quota status: UNKNOWN/)
+  assert.deepEqual(requests.map((request) => request.url), ['/api/v1/me/quota?model=gpt-5.6-sol', '/api/v1/me/upstream-quota?model=gpt-5.6-sol'])
+  assert.ok(requests.every((request) => request.authorization === 'Bearer vk-test-key'))
+})
+
+test('upstream quota text includes saved item values and rejects unauthorized keys', async (t) => {
+  const api = await startApi(t, (request, response) => {
+    if (request.headers.authorization === 'Bearer vk-denied') {
+      respondJson(response, { code: 'FORBIDDEN' }, 403)
+      return
+    }
+    respondJson(response, { code: 'OK', data: {
+      model: 'gpt-5.6-sol', status: 'KNOWN', subscriptionName: 'Primary', providerName: 'Example',
+      checkedAt: '2026-10-23T00:00:00Z', quotas: [{ code: 'tokens', name: 'Tokens', status: 'AVAILABLE',
+        limitValue: '1000', usedValue: '300', remainingValue: '700', unit: 'tokens' }],
+    } })
+  })
+  const { port } = api.address()
+  const environment = { ZENTROLA_BASE_URL: `http://127.0.0.1:${port}/v1`, ZENTROLA_VIRTUAL_KEY: 'vk-allowed' }
+  const { rpc } = startMcp(t, 'codex', environment)
+  await initialize(rpc)
+  const quota = await callUpstreamQuota(rpc)
+  assert.match(quota.result.content[0].text, /Tokens: AVAILABLE; limit 1000, used 300, remaining 700 tokens/)
+
+  const denied = startMcp(t, 'codex', { ...environment, ZENTROLA_VIRTUAL_KEY: 'vk-denied' })
+  await initialize(denied.rpc)
+  const result = await callUpstreamQuota(denied.rpc)
+  assert.equal(result.result.isError, true)
+  assert.match(result.result.content[0].text, /HTTP 403/)
+})
+
 async function callProvider(rpc, argumentsValue = { model: 'gpt-5.6-sol' }) {
   return rpc(4, 'tools/call', { name: 'get_provider', arguments: argumentsValue })
 }
@@ -159,6 +216,8 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
   const listed = await rpc(2, 'tools/list')
   assert.deepEqual(listed.result.tools.map(({ name }) => name), [
     'get_usage',
+    'get_quota',
+    'get_upstream_quota',
     'get_provider',
     'generate_image',
   ])
@@ -193,7 +252,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['tokens', 'from', 'to', 'timezone', 'fromLocal', 'toLocal'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[1].inputSchema, {
+  assert.deepEqual(listed.result.tools[3].inputSchema, {
     type: 'object',
     properties: {
       model: {
@@ -205,7 +264,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['model'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[1].outputSchema, {
+  assert.deepEqual(listed.result.tools[3].outputSchema, {
     type: 'object',
     properties: {
       name: { type: 'string' },
@@ -213,7 +272,7 @@ async function testEnvironment(t, client, clientEnvironment, expectedKey = 'vk-t
     required: ['name'],
     additionalProperties: false,
   })
-  assert.deepEqual(listed.result.tools[2].inputSchema, {
+  assert.deepEqual(listed.result.tools[4].inputSchema, {
     type: 'object',
     properties: {
       prompt: {

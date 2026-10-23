@@ -1,7 +1,7 @@
 {
   "name": "zentrola",
-  "version": "0.2.1",
-  "description": "Generate images and access Zentrola account information, including token usage and the current service provider.",
+  "version": "0.2.2",
+  "description": "Generate images and access Zentrola account information, including token usage, quotas, and the current service provider.",
   "author": {
     "name": "Zentrola"
   }

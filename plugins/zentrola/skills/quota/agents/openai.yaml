@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zentrola Quota"
+  short_description: "Show your monthly Token limit, usage and remaining quota"
+  default_prompt: "Use $zentrola:quota to show my current-month Zentrola quota."
+
+policy:
+  allow_implicit_invocation: true
