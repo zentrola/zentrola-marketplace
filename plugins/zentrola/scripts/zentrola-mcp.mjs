@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola', version: '0.4.2' }
+const serverInfo = { name: 'zentrola', version: '0.4.3' }
 const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
@@ -912,7 +912,8 @@ async function getUpstreamQuota(argumentsValue) {
     if (account.refreshError) lines.push(`Refresh failed: ${account.refreshError}`)
     if (account.status === 'STALE') lines.push('Snapshot is older than 5 minutes and may be outdated.')
     if (account.status !== 'UNKNOWN') {
-      for (const item of account.quotas) lines.push(formatUpstreamItem(item, timezone))
+      // List items keep quota windows, such as Claude's overall "Subscription" status, apart from account headers.
+      for (const item of account.quotas) lines.push(`- ${formatUpstreamItem(item, timezone)}`)
     }
   }
   if (!lines.length) {

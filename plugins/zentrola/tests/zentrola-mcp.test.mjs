@@ -171,13 +171,13 @@ test('upstream quota text includes saved item values and rejects unauthorized ke
   await initialize(rpc)
   const quota = await callUpstreamQuota(rpc)
   assert.equal(quota.result.structuredContent.accounts.length, 3)
-  assert.match(quota.result.content[0].text, /Tokens: AVAILABLE; limit 1000, used 300, remaining 700 tokens/)
+  assert.match(quota.result.content[0].text, /\n- Tokens: AVAILABLE; limit 1000, used 300, remaining 700 tokens/)
 
   const openai = await callUpstreamQuota(rpc, { provider: ' openai ' })
   assert.deepEqual(openai.result.structuredContent.accounts.map(({ subscriptionName }) => subscriptionName), ['Codex A', 'Codex B'])
   const text = openai.result.content[0].text
   assert.match(text, /Subscription: Codex A \(OpenAI\)/)
-  assert.match(text, /7-day window: AVAILABLE; 99% remaining; resets at 2026-10-30T02:45:00Z \(2026-10-\d{2}T\d{2}:\d{2}:00(?:Z|[+-]\d{2}:\d{2})\)/)
+  assert.match(text, /\n- 7-day window: AVAILABLE; 99% remaining; resets at 2026-10-30T02:45:00Z \(2026-10-\d{2}T\d{2}:\d{2}:00(?:Z|[+-]\d{2}:\d{2})\)/)
   assert.match(text, /Subscription: Codex B \(OpenAI Codex\)\nQuota status: UNKNOWN/)
   assert.doesNotMatch(text, /Primary/)
 
@@ -200,7 +200,9 @@ test('upstream quota reports stale snapshots with their refresh error', async (t
     respondJson(response, { code: 'OK', data: [
       { status: 'STALE', subscriptionName: 'Claude A', providerName: 'Anthropic', checkedAt: '2026-10-22T01:49:03Z',
         refreshError: 'UPSTREAM_AUTH_FAILED', quotas: [{ code: 'seven_day', name: null, status: 'NEAR_LIMIT', usedPercent: 89,
-          windowDurationSeconds: 604800, resetsAt: '2026-10-23T17:00:00Z', observedAt: '2026-10-22T01:49:03Z' }] },
+          windowDurationSeconds: 604800, resetsAt: '2026-10-23T17:00:00Z', observedAt: '2026-10-22T01:49:03Z' },
+        { code: 'subscription', name: 'Subscription', status: 'NEAR_LIMIT', usedPercent: null, windowDurationSeconds: null,
+          resetsAt: '2026-10-23T17:00:00Z', observedAt: '2026-10-22T01:49:03Z' }] },
       { status: 'UNKNOWN', subscriptionName: 'Claude B', providerName: 'Anthropic', checkedAt: null,
         refreshError: 'PROVIDER_MODEL_MAPPING_REQUIRED', quotas: [] },
       { status: 'KNOWN', subscriptionName: 'Codex A', providerName: 'OpenAI', checkedAt: '2026-10-24T02:00:00Z',
@@ -215,7 +217,11 @@ test('upstream quota reports stale snapshots with their refresh error', async (t
   assert.deepEqual(quota.result.structuredContent.accounts.map(({ status }) => status), ['STALE', 'UNKNOWN'])
   const text = quota.result.content[0].text
   assert.match(text, /Quota status: STALE\nLast checked: 2026-10-22T01:49:03Z [^\n]*\nRefresh failed: UPSTREAM_AUTH_FAILED\nSnapshot is older than 5 minutes/)
-  assert.match(text, /7-day window: NEAR_LIMIT; 11% remaining/)
+  assert.match(text, /\n- 7-day window: NEAR_LIMIT; 11% remaining/)
+  // The overall subscription status is a list item, never confused with an account header.
+  assert.match(text, /\n- Subscription: NEAR_LIMIT; resets at 2026-10-23T17:00:00Z/)
+  assert.deepEqual(text.split('\n').filter((line) => line.startsWith('Subscription: ')),
+    ['Subscription: Claude A (Anthropic)', 'Subscription: Claude B (Anthropic)'])
   assert.match(text, /Quota status: UNKNOWN\nLast checked: -\nRefresh failed: PROVIDER_MODEL_MAPPING_REQUIRED/)
 })
 
