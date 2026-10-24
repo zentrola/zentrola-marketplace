@@ -1,6 +1,6 @@
 interface:
   display_name: "Zentrola Upstream Quota"
-  short_description: "Show saved quota snapshots of provider subscriptions"
+  short_description: "Show quotas of provider subscriptions"
   default_prompt: "Use $zentrola:upstream-quota to show my OpenAI subscription quota."
 
 policy:

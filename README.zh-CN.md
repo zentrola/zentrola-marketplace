@@ -17,7 +17,7 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
 
 图片生成工具直接向 Zentrola `/v1/responses` 发起请求，不访问 ChatGPT Codex 上游。请求固定使用 `store: false`、`stream: true` 和 `image_generation` tool；默认模型为 `gpt-5.6-sol`，也可显式传入其他模型。MCP 增量读取 SSE，从 `response.image_generation_call.completed` 的 `result` 或最新的 `partial_image_b64` 获取图片，验证 PNG 后以 MCP 原生 `image` 内容返回。解析器不使用固定 64 KiB 行缓冲，可处理数 MiB 的图片事件。
 
-`get_quota` 返回当前 UTC 月所有模型的 Token 总用量与个人额度；指定模型时，再返回个人与适用用户组中最小的剩余额度。`get_upstream_quota` 需要按 Key 单独授权，无需指定模型：一次请求返回该 Key 可路由到的全部服务商订阅号额度快照，每个账号一条，可按服务商名称（如 OpenAI）筛选。每个额度窗口给出窗口时长、剩余百分比，以及 UTC 和设备本地时区的重置时间。无数据或快照过期时返回未知，不触发上游实时探测。
+`get_quota` 返回当前 UTC 月所有模型的 Token 总用量与个人额度；指定模型时，再返回个人与适用用户组中最小的剩余额度。`get_upstream_quota` 需要按 Key 单独授权，无需指定模型：一次请求返回该 Key 可路由到的全部服务商订阅号额度，每个账号一条，可按服务商名称（如 OpenAI）筛选。5 分钟内的快照直接返回，更早的账号按需向上游刷新。每个额度窗口给出窗口时长、剩余百分比，以及 UTC 和设备本地时区的重置时间。刷新失败时返回原快照并标为 `STALE`，附带刷新错误码；从未取得额度的账号返回 `UNKNOWN`。
 
 `list_groups` 列出启用分组，供创建成员时选择；`create_member` 创建普通成员并加入至少一个分组，同时签发已启用的首把 Virtual Key；`issue_member_key` 为已有普通成员签发 Key，不改变成员状态，停用成员返回 `MEMBER_DISABLED`；`set_member_status` 启用或停用普通成员，停用后该成员全部 Key 立即无法使用但不注销，启用要求成员至少有一把有效 Key。这些操作都要求调用方 Key 单独获得成员管理授权，不能操作调用者本人或持有管理授权的成员，不能创建管理员，也不会把管理权限授予新 Key。完整新 Key 只返回一次。
 
@@ -49,7 +49,7 @@ Codex 的自定义 prompt slash command 已废弃，普通 Skill 不能注册自
     │   │   ├── SKILL.md
     │   │   └── agents/openai.yaml
     │   ├── quota                         # 个人 Token 额度查询
-    │   ├── upstream-quota                # 授权订阅额度快照
+    │   ├── upstream-quota                # 授权订阅额度查询
     │   ├── member-management             # 分组查询与明确请求的普通成员操作
     │   ├── provider                      # 服务商查询流程
     │   │   ├── SKILL.md

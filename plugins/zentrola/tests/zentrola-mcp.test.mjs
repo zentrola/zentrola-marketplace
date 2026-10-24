@@ -195,6 +195,30 @@ test('upstream quota text includes saved item values and rejects unauthorized ke
   assert.match(result.result.content[0].text, /HTTP 403/)
 })
 
+test('upstream quota reports stale snapshots with their refresh error', async (t) => {
+  const api = await startApi(t, (request, response) => {
+    respondJson(response, { code: 'OK', data: [
+      { status: 'STALE', subscriptionName: 'Claude A', providerName: 'Anthropic', checkedAt: '2026-10-22T01:49:03Z',
+        refreshError: 'UPSTREAM_AUTH_FAILED', quotas: [{ code: 'seven_day', name: null, status: 'NEAR_LIMIT', usedPercent: 89,
+          windowDurationSeconds: 604800, resetsAt: '2026-10-23T17:00:00Z', observedAt: '2026-10-22T01:49:03Z' }] },
+      { status: 'UNKNOWN', subscriptionName: 'Claude B', providerName: 'Anthropic', checkedAt: null,
+        refreshError: 'PROVIDER_MODEL_MAPPING_REQUIRED', quotas: [] },
+      { status: 'KNOWN', subscriptionName: 'Codex A', providerName: 'OpenAI', checkedAt: '2026-10-24T02:00:00Z',
+        refreshError: null, quotas: [] },
+    ] })
+  })
+  const { port } = api.address()
+  const { rpc } = startMcp(t, 'codex', { ZENTROLA_BASE_URL: `http://127.0.0.1:${port}/v1`, ZENTROLA_VIRTUAL_KEY: 'vk-allowed' })
+  await initialize(rpc)
+  const quota = await callUpstreamQuota(rpc, { provider: 'anthropic' })
+  assert.notEqual(quota.result.isError, true)
+  assert.deepEqual(quota.result.structuredContent.accounts.map(({ status }) => status), ['STALE', 'UNKNOWN'])
+  const text = quota.result.content[0].text
+  assert.match(text, /Quota status: STALE\nLast checked: 2026-10-22T01:49:03Z [^\n]*\nRefresh failed: UPSTREAM_AUTH_FAILED\nSnapshot is older than 5 minutes/)
+  assert.match(text, /7-day window: NEAR_LIMIT; 11% remaining/)
+  assert.match(text, /Quota status: UNKNOWN\nLast checked: -\nRefresh failed: PROVIDER_MODEL_MAPPING_REQUIRED/)
+})
+
 test('member management tools create only ordinary active members and Keys', async (t) => {
   const requests = []
   const api = await startApi(t, async (request, response) => {

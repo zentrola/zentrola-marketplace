@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import process from 'node:process'
 
 const protocolVersion = '2025-06-18'
-const serverInfo = { name: 'zentrola', version: '0.4.1' }
+const serverInfo = { name: 'zentrola', version: '0.4.2' }
 const usageTool = {
   name: 'get_usage',
   title: 'Get Zentrola usage',
@@ -61,7 +61,7 @@ const quotaTool = {
 const upstreamQuotaTool = {
   name: 'get_upstream_quota',
   title: 'Get provider subscription quotas',
-  description: 'Get the saved quota snapshots of every provider subscription account this Access Key can be routed to, one entry per account. Optionally filter by provider name, for example OpenAI. Requires per-key authorization.',
+  description: 'Get the quota of every provider subscription account this Access Key can be routed to, one entry per account. Snapshots younger than 5 minutes are returned as is; older accounts are refreshed from the upstream on demand, and a failed refresh returns the previous snapshot as STALE. Optionally filter by provider name, for example OpenAI. Requires per-key authorization.',
   inputSchema: {
     type: 'object',
     properties: { provider: { type: 'string', minLength: 1, description: 'Optional provider name filter, matched case-insensitively as a substring, for example OpenAI.' } },
@@ -863,8 +863,9 @@ function validTimestamp(value) {
 function validUpstreamAccount(account) {
   return account !== null && typeof account === 'object' &&
     typeof account.providerName === 'string' && typeof account.subscriptionName === 'string' &&
-    ['KNOWN', 'UNKNOWN'].includes(account.status) && Array.isArray(account.quotas) &&
+    ['KNOWN', 'STALE', 'UNKNOWN'].includes(account.status) && Array.isArray(account.quotas) &&
     (account.checkedAt === null || validTimestamp(account.checkedAt)) &&
+    (account.refreshError == null || typeof account.refreshError === 'string') &&
     account.quotas.every((item) => item !== null && typeof item === 'object' && typeof item.code === 'string' &&
       (item.usedPercent == null || Number.isFinite(item.usedPercent)) &&
       (item.windowDurationSeconds == null || Number.isSafeInteger(item.windowDurationSeconds)) &&
@@ -908,7 +909,9 @@ async function getUpstreamQuota(argumentsValue) {
       `Quota status: ${account.status}`,
       `Last checked: ${account.checkedAt ? `${account.checkedAt} (${formatDeviceTimestamp(account.checkedAt, timezone)})` : '-'}`,
     )
-    if (account.status === 'KNOWN') {
+    if (account.refreshError) lines.push(`Refresh failed: ${account.refreshError}`)
+    if (account.status === 'STALE') lines.push('Snapshot is older than 5 minutes and may be outdated.')
+    if (account.status !== 'UNKNOWN') {
       for (const item of account.quotas) lines.push(formatUpstreamItem(item, timezone))
     }
   }
